@@ -1,53 +1,98 @@
 import { Handler } from '@netlify/functions';
 import fetch from 'node-fetch';
+import FormData from 'form-data';
 
 export const handler: Handler = async (event) => {
   try {
     if (event.httpMethod !== 'POST') {
       return {
         statusCode: 405,
-        body: 'Method Not Allowed',
+        body: JSON.stringify({ error: 'Method Not Allowed' }),
       };
     }
 
+    // Log di tutte le variabili d'ambiente disponibili (solo i nomi, non i valori)
+    console.log('Available env vars:', Object.keys(process.env));
+
     const apiKey = process.env.OPENAI_API_KEY;
+    console.log('API Key present:', !!apiKey);
+    console.log('API Key length:', apiKey?.length);
+
     if (!apiKey) {
       return {
         statusCode: 500,
-        body: 'Missing OpenAI API key',
+        body: JSON.stringify({ 
+          error: 'Missing OpenAI API key',
+          envVars: Object.keys(process.env)
+        }),
       };
     }
 
-    // Il body della funzione arriva in Base64 → va decodificato
-    const contentType = event.headers['content-type'] || event.headers['Content-Type'];
-    const buffer = Buffer.from(event.body || '', 'base64');
+    // Log degli headers ricevuti
+    console.log('Request headers:', event.headers);
+
+    // Parse the multipart form data
+    if (!event.body) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'No form data provided' }),
+      };
+    }
+
+    // Log per debug
+    console.log('Content-Type:', event.headers['content-type']);
+    console.log('Body length:', event.body.length);
+
+    // Crea un nuovo FormData per OpenAI
+    const formData = new FormData();
+    formData.append('file', Buffer.from(event.body, 'base64'), {
+      filename: 'audio.webm',
+      contentType: event.headers['content-type']
+    });
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'it');
+    formData.append('response_format', 'text');
 
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': contentType
+        ...formData.getHeaders()
       },
-      body: buffer
+      body: formData
     });
 
     const result = await response.text();
+    console.log('OpenAI Response Status:', response.status);
 
     if (!response.ok) {
+      console.error('OpenAI API Error:', result);
       return {
         statusCode: response.status,
-        body: `OpenAI error: ${result}`,
+        body: JSON.stringify({ 
+          error: 'OpenAI API Error',
+          details: result,
+          statusCode: response.status
+        }),
       };
     }
 
     return {
       statusCode: 200,
-      body: result,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ result }),
     };
   } catch (err: any) {
+    console.error('Server error:', err);
     return {
       statusCode: 500,
-      body: `Server error: ${err.message}`,
+      body: JSON.stringify({
+        error: 'Server Error',
+        message: err.message,
+        stack: err.stack
+      }),
     };
   }
 };

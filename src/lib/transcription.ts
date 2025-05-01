@@ -5,7 +5,7 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
       size: audioBlob.size
     });
 
-    // Crea FormData per inviare l’audio alla Netlify Function
+    // Crea FormData per inviare l'audio alla Netlify Function
     const formData = new FormData();
     formData.append('file', audioBlob, 'recording.webm');
     formData.append('model', 'whisper-1');
@@ -19,12 +19,14 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
       body: formData
     });
 
+    const responseData = await response.json();
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Errore trascrizione: ${response.status} ${response.statusText}\n${errorText}`);
+      console.error('[transcribeAudio] Errore risposta:', responseData);
+      throw new Error(responseData.error || `Errore trascrizione: ${response.status} ${response.statusText}`);
     }
 
-    const transcription = await response.text();
+    const transcription = responseData.result;
 
     console.log('[transcribeAudio] Trascrizione completata:', {
       anteprima: transcription.substring(0, 100) + '...'
