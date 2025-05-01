@@ -13,22 +13,13 @@ export const handler: Handler = async (event) => {
       };
     }
 
-    // Log di tutte le variabili d'ambiente disponibili (solo i nomi, non i valori)
-    console.log('Available env vars:', Object.keys(process.env));
-
     const apiKey = process.env.OPENAI_API_KEY;
-    console.log('API Key present:', !!apiKey);
-    console.log('API Key length:', apiKey?.length);
-
     if (!apiKey) {
       return {
         statusCode: 500,
         body: JSON.stringify({ error: 'Missing OpenAI API key' }),
       };
     }
-
-    // Log degli headers ricevuti
-    console.log('Request headers:', event.headers);
 
     // Verifica che ci siano i dati e il content-type
     if (!event.body || !event.headers['content-type']) {
@@ -38,31 +29,57 @@ export const handler: Handler = async (event) => {
       };
     }
 
+    console.log('Processing request with content-type:', event.headers['content-type']);
+
     // Funzione per parsare il multipart form data
     const parseFormData = () => {
       return new Promise<Buffer>((resolve, reject) => {
-        const chunks: Buffer[] = [];
+        let fileBuffer: Buffer | null = null;
         const busboy = Busboy({ 
           headers: { 'content-type': event.headers['content-type'] || '' }
         });
 
-        busboy.on('file', (_, file) => {
+        busboy.on('file', (fieldname, file, info) => {
+          console.log('Processing file:', { fieldname, filename: info.filename, encoding: info.encoding, mimeType: info.mimeType });
+          const chunks: Buffer[] = [];
+
           file.on('data', (data) => {
             chunks.push(data);
           });
+
+          file.on('end', () => {
+            fileBuffer = Buffer.concat(chunks);
+            console.log('File processing complete. Size:', fileBuffer.length);
+          });
+        });
+
+        busboy.on('field', (fieldname, value) => {
+          console.log('Form field:', { fieldname, value });
         });
 
         busboy.on('finish', () => {
-          resolve(Buffer.concat(chunks));
+          if (!fileBuffer) {
+            reject(new Error('No file found in form data'));
+            return;
+          }
+          resolve(fileBuffer);
         });
 
         busboy.on('error', (error) => {
+          console.error('Busboy error:', error);
           reject(error);
         });
 
         if (event.body) {
-          const stream = Readable.from(Buffer.from(event.body, 'base64'));
-          stream.pipe(busboy);
+          try {
+            const buffer = Buffer.from(event.body, 'base64');
+            console.log('Request body size:', buffer.length);
+            const stream = Readable.from(buffer);
+            stream.pipe(busboy);
+          } catch (error) {
+            console.error('Error processing request body:', error);
+            reject(error);
+          }
         } else {
           reject(new Error('No body provided'));
         }
@@ -70,7 +87,9 @@ export const handler: Handler = async (event) => {
     };
 
     // Ottieni il file audio dal form data
+    console.log('Starting form data parsing...');
     const audioBuffer = await parseFormData();
+    console.log('Form data parsed successfully. Audio size:', audioBuffer.length);
 
     // Prepara il form data per OpenAI
     const form = new FormData();
@@ -82,6 +101,7 @@ export const handler: Handler = async (event) => {
     form.append('language', 'it');
     form.append('response_format', 'text');
 
+    console.log('Sending request to OpenAI...');
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
@@ -92,6 +112,8 @@ export const handler: Handler = async (event) => {
       body: form
     });
 
+    console.log('OpenAI response status:', response.status);
+    
     if (!response.ok) {
       const error = await response.text();
       console.error('OpenAI API Error:', error);
@@ -105,6 +127,8 @@ export const handler: Handler = async (event) => {
     }
 
     const result = await response.text();
+    console.log('Transcription successful. Length:', result.length);
+    
     return {
       statusCode: 200,
       headers: {
@@ -118,7 +142,8 @@ export const handler: Handler = async (event) => {
       statusCode: 500,
       body: JSON.stringify({
         error: 'Server Error',
-        message: err.message
+        message: err.message,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
       }),
     };
   }
