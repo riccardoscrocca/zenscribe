@@ -14,10 +14,22 @@ export const handler: Handler = async (event) => {
     }
 
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
+    console.log('API Key format check:', {
+      present: !!apiKey,
+      length: apiKey?.length,
+      startsWithSk: apiKey?.startsWith('sk-'),
+      // Non logghiamo mai la chiave completa per sicurezza
+      firstChars: apiKey?.substring(0, 5),
+      lastChars: apiKey?.substring(apiKey.length - 4)
+    });
+
+    if (!apiKey || !apiKey.startsWith('sk-')) {
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: 'Missing OpenAI API key' }),
+        body: JSON.stringify({ 
+          error: 'Invalid OpenAI API key format',
+          details: 'The API key should start with sk-'
+        }),
       };
     }
 
@@ -105,7 +117,7 @@ export const handler: Handler = async (event) => {
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${apiKey.trim()}`, // Rimuoviamo eventuali spazi
         ...form.getHeaders()
       },
       // @ts-ignore - form-data è compatibile con node-fetch
@@ -121,7 +133,8 @@ export const handler: Handler = async (event) => {
         statusCode: response.status,
         body: JSON.stringify({ 
           error: 'OpenAI API Error',
-          details: error
+          details: error,
+          status: response.status
         }),
       };
     }
