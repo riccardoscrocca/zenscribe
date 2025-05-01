@@ -1,8 +1,5 @@
 import { supabase } from './supabase';
 import {
-  generatePrompt,
-  parseAIResponse,
-  validateReport,
   type ConsultationData,
   type MedicalReport
 } from './aiInstructions';
@@ -15,39 +12,24 @@ export async function analyzeConsultation(
       throw new Error('Nessuna trascrizione disponibile da analizzare');
     }
 
-    const messages = generatePrompt(consultation);
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('/.netlify/functions/analyze-consultation', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${import.meta.env.OPENAI_API_KEY}`
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model: 'gpt-4',
-        messages,
-        temperature: 0.1,
-        max_tokens: 2000
-      })
+      body: JSON.stringify(consultation)
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Errore nella risposta AI: ${response.status} ${response.statusText}\n${errorText}`);
+      const error = await response.text();
+      throw new Error(`Errore nell'analisi: ${response.status} ${response.statusText}\n${error}`);
     }
 
     const data = await response.json();
-    const aiContent = data.choices?.[0]?.message?.content;
-
-    if (!aiContent) throw new Error('Nessuna risposta ricevuta dal modello AI');
-
-    const report = parseAIResponse(aiContent);
-    const warnings = validateReport(report);
-
-    return { report, warnings };
+    return data;
   } catch (error) {
     console.error('AI analysis error:', error);
-    throw new Error('Failed to analyze consultation');
+    throw error;
   }
 }
 
