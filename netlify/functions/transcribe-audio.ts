@@ -140,8 +140,13 @@ export const handler: Handler = async (event) => {
     form.append('model', 'whisper-1');
     form.append('language', 'it');
     form.append('response_format', 'text');
+    form.append('temperature', '0');
 
+    // Log dettagliati per il debugging
+    console.log('Form data prepared for OpenAI with model, language and response_format parameters');
     console.log('Sending request to OpenAI with audio format:', contentType);
+    console.log('Audio buffer size:', audioBuffer.length);
+
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {

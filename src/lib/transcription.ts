@@ -82,19 +82,76 @@ export async function uploadAndTranscribeFile(file: File): Promise<string> {
 
     // Crea il FormData con il file originale
     const formData = new FormData();
-    formData.append('file', file, file.name);
+    
+    // Importante: usiamo esplicitamente "file" come nome del campo
+    formData.append('file', file);
     formData.append('model', 'whisper-1');
     formData.append('language', 'it');
     formData.append('response_format', 'text');
     formData.append('temperature', '0');
+    
+    // Debug log
+    for (const pair of formData.entries()) {
+      console.log('[uploadAndTranscribe] FormData entry:', pair[0], 
+        pair[0] === 'file' ? `File: ${file.name}, type: ${file.type}, size: ${file.size}` : pair[1]);
+    }
 
-    console.log('[uploadAndTranscribe] FormData creato, invio file...', {
-      filename: file.name,
-      type: file.type,
-      keys: [...formData.keys()].join(', ')
+    console.log('[uploadAndTranscribe] FormData creato, invio file...');
+
+    // Chiamata diretta alla funzione serverless
+    console.log('[uploadAndTranscribe] Chiamata diretta alla funzione Netlify...');
+    const response = await fetch('/.netlify/functions/transcribe-audio', {
+      method: 'POST',
+      body: formData
     });
 
-    return await callTranscriptionApi(formData);
+    console.log('[uploadAndTranscribe] Risposta ricevuta:', {
+      status: response.status,
+      ok: response.ok,
+      statusText: response.statusText
+    });
+
+    if (!response.ok) {
+      let errorMessage = '';
+      try {
+        const errorData = await response.json();
+        console.error('[uploadAndTranscribe] Errore risposta:', errorData);
+        errorMessage = errorData.error || errorData.details || '';
+      } catch (e) {
+        console.error('[uploadAndTranscribe] Errore nel parsing della risposta:', e);
+        errorMessage = await response.text();
+      }
+      throw new Error(`Errore trascrizione (${response.status}): ${errorMessage || response.statusText}`);
+    }
+
+    console.log('[uploadAndTranscribe] Parsing della risposta...');
+    let responseData: any;
+    try {
+      responseData = await response.json();
+    } catch (e) {
+      console.error('[uploadAndTranscribe] Errore nel parsing JSON della risposta:', e);
+      const textResponse = await response.text();
+      console.log('[uploadAndTranscribe] Risposta testuale:', textResponse.substring(0, 100));
+      throw new Error('Errore nel parsing della risposta');
+    }
+    
+    console.log('[uploadAndTranscribe] Dati risposta:', {
+      tipoRisposta: typeof responseData,
+      chiavi: responseData ? Object.keys(responseData).join(', ') : 'nessuna'
+    });
+    
+    const transcription = responseData.result;
+
+    console.log('[uploadAndTranscribe] Trascrizione completata:', {
+      lunghezza: transcription ? transcription.length : 0,
+      anteprima: transcription ? transcription.substring(0, 100) + '...' : 'nessuna trascrizione'
+    });
+
+    if (!transcription) {
+      throw new Error('Nessuna trascrizione ricevuta dal server');
+    }
+
+    return transcription;
   } catch (error) {
     console.error('[uploadAndTranscribe] Errore:', error);
     throw error;
