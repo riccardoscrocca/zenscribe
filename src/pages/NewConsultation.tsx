@@ -547,27 +547,35 @@ export function NewConsultation() {
         </div>
 
         {(isTranscribing || isAnalyzing) && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                <span className="text-sm font-medium text-gray-700">
-                  {processingSteps[processingStep]}...
-                </span>
+          <div className="mt-6 p-6 bg-white rounded-lg shadow">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
+                <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
               </div>
-              {uploadProgress > 0 && (
-                <span className="text-sm text-gray-500">
-                  {uploadProgress}%
-                </span>
-              )}
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div
-                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                style={{
-                  width: `${uploadProgress > 0 ? uploadProgress : (processingStep + 1) * 25}%`
-                }}
-              />
+              
+              <h3 className="text-lg font-medium text-gray-900">
+                {isTranscribing ? 'Trascrizione in corso...' : 'Analisi in corso...'}
+              </h3>
+              
+              <p className="text-sm text-gray-500">
+                {processingSteps[processingStep]}
+              </p>
+            
+              <div className="w-full max-w-md mt-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-blue-700">
+                    {uploadProgress > 0 ? `${uploadProgress}%` : `Passo ${processingStep + 1} di ${processingSteps.length}`}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${uploadProgress > 0 ? uploadProgress : (processingStep + 1) * 25}%`
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         )}

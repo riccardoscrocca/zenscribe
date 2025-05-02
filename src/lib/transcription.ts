@@ -15,6 +15,8 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
       extension = 'm4a';
     }
 
+    console.log('[transcribeAudio] Estensione determinata:', extension);
+
     // Crea FormData per inviare l'audio alla Netlify Function
     const formData = new FormData();
     formData.append('file', audioBlob, `recording.${extension}`);
@@ -23,15 +25,23 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     formData.append('response_format', 'text');
     formData.append('temperature', '0');
 
-    console.log('[transcribeAudio] Invio file...', {
+    console.log('[transcribeAudio] FormData creato, invio file...', {
       filename: `recording.${extension}`,
-      type: audioBlob.type
+      type: audioBlob.type,
+      keys: [...formData.keys()].join(', ')
     });
 
     // Chiama la Netlify Function che usa la chiave server-side
+    console.log('[transcribeAudio] Chiamata alla funzione Netlify...');
     const response = await fetch('/.netlify/functions/transcribe-audio', {
       method: 'POST',
       body: formData
+    });
+
+    console.log('[transcribeAudio] Risposta ricevuta:', {
+      status: response.status,
+      ok: response.ok,
+      statusText: response.statusText
     });
 
     if (!response.ok) {
@@ -41,10 +51,16 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     }
 
     const responseData = await response.json();
+    console.log('[transcribeAudio] Dati risposta:', {
+      tipoRisposta: typeof responseData,
+      chiavi: responseData ? Object.keys(responseData).join(', ') : 'nessuna'
+    });
+    
     const transcription = responseData.result;
 
     console.log('[transcribeAudio] Trascrizione completata:', {
-      anteprima: transcription.substring(0, 100) + '...'
+      lunghezza: transcription ? transcription.length : 0,
+      anteprima: transcription ? transcription.substring(0, 100) + '...' : 'nessuna trascrizione'
     });
 
     return transcription;
