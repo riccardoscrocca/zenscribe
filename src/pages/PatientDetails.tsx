@@ -461,14 +461,35 @@ export function PatientDetails() {
   }
 
   return (
-    <div className="min-h-screen bg-white p-6">
-      <button
-        onClick={() => navigate('/app/patients')}
-        className="mb-6 flex items-center gap-2 text-gray-600 hover:text-gray-900"
-      >
-        <ArrowLeft className="h-5 w-5" />
-        <span>Torna alla lista pazienti</span>
-      </button>
+    <div className="container max-w-5xl mx-auto px-4 sm:px-6 py-8">
+      <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => navigate('/app/patients')}
+          className="flex items-center text-blue-600 hover:text-blue-800"
+        >
+          <ArrowLeft className="h-4 w-4 mr-1" />
+          <span>Torna ai pazienti</span>
+        </button>
+        
+        <div className="flex gap-2">
+          <button
+            onClick={() => navigate('/app/consultation/new')}
+            className="px-4 py-2 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 flex items-center"
+          >
+            <PencilLine className="h-4 w-4 mr-2" />
+            Nuova Consultazione
+          </button>
+          
+          <button
+            onClick={() => setIsEditing(true)}
+            className="px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-md hover:bg-gray-200 flex items-center"
+            disabled={isEditing}
+          >
+            <Edit className="h-4 w-4 mr-2" />
+            Modifica
+          </button>
+        </div>
+      </div>
 
       {error && (
         <div className="mb-6 p-4 bg-red-50 rounded-lg flex items-center gap-2 text-red-700">

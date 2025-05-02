@@ -86,7 +86,9 @@ export async function getSubscriptionStatus(userId: string) {
 
 export async function updateMinutesUsed(userId: string, durationSeconds: number) {
   try {
+    console.log('updateMinutesUsed called with:', { userId, durationSeconds });
     const minutes = Math.ceil(durationSeconds / 60);
+    console.log('Calculated minutes:', { minutes, calculation: `Math.ceil(${durationSeconds} / 60) = ${minutes}` });
     const period = getCurrentPeriod();
 
     // Get user's subscription tier and plan details
@@ -117,7 +119,7 @@ export async function updateMinutesUsed(userId: string, durationSeconds: number)
       .gte('current_period_end', nowIso)
       .maybeSingle();
 
-    console.log('Current subscription:', subscription);
+    console.log('Current subscription:', { subscription, minutesToAdd: minutes });
 
     // If no subscription exists, create one
     if (!subscription) {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Mic, Upload, AlertCircle, Loader2, UserPlus, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { drawWaveform } from '../lib/audioVisualizer';
@@ -27,6 +27,7 @@ const processingSteps = [
 export function NewConsultation() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isRecording, setIsRecording] = useState(false);
   const [gdprConsent, setGdprConsent] = useState(false);
   const [hasMicrophonePermission, setHasMicrophonePermission] = useState<boolean | null>(null);
@@ -42,6 +43,8 @@ export function NewConsultation() {
   const [selectedPatient, setSelectedPatient] = useState<string>('');
   const [visitType, setVisitType] = useState<'prima_visita' | 'visita_controllo'>('prima_visita');
   const [loadingPatients, setLoadingPatients] = useState(true);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -55,8 +58,26 @@ export function NewConsultation() {
   useEffect(() => {
     if (user?.id) {
       loadPatients();
+      
+      // Leggi l'ID del paziente dalla query string
+      const searchParams = new URLSearchParams(location.search);
+      const patientId = searchParams.get('patientId');
+      
+      if (patientId) {
+        setSelectedPatient(patientId);
+      }
     }
-  }, [user]);
+  }, [user, location]);
+
+  useEffect(() => {
+    if (selectedPatient && patients.length > 0) {
+      const patientExists = patients.some(p => p.id === selectedPatient);
+      if (!patientExists) {
+        setError('Paziente non trovato. Seleziona un paziente dalla lista.');
+        setSelectedPatient('');
+      }
+    }
+  }, [selectedPatient, patients]);
 
   useEffect(() => {
     navigator.mediaDevices.getUserMedia({ audio: true })
@@ -81,14 +102,18 @@ export function NewConsultation() {
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
+    let finalTime = 0;
     
     if (isRecording) {
       interval = setInterval(() => {
         const elapsed = Date.now() - recordingStartTimeRef.current;
-        setRecordingTime(Math.floor(elapsed / 1000));
+        const seconds = Math.ceil(elapsed / 1000);
+        setRecordingTime(seconds);
+        finalTime = seconds;
       }, 1000);
-    } else {
-      setRecordingTime(0);
+    } else if (finalTime > 0) {
+      // Mantieni il tempo finale per il salvataggio
+      setRecordingTime(finalTime);
     }
 
     return () => {
@@ -147,9 +172,23 @@ export function NewConsultation() {
       const source = audioContextRef.current.createMediaStreamSource(stream);
       source.connect(analyserRef.current);
 
-      // Specify MIME type explicitly
+      // Determina il formato audio supportato
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+        'audio/ogg;codecs=opus'
+      ];
+      
+      const supportedType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
+      
+      if (!supportedType) {
+        throw new Error('Nessun formato audio supportato dal browser');
+      }
+
+      // Usa il formato supportato
       mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: supportedType
       });
       
       mediaRecorderRef.current.ondataavailable = (event) => {
@@ -219,6 +258,7 @@ export function NewConsultation() {
       setProcessingStep(3);
 
       setIsSaving(true);
+      console.log('Saving consultation with recording time:', recordingTime);
       await saveConsultation(
         {
           patientId: selectedPatient,
@@ -232,8 +272,8 @@ export function NewConsultation() {
         recordingTime
       );
 
-      const minutesUsed = Math.ceil(recordingTime / 60);
-      const updated = await updateMinutesUsed(user.id, minutesUsed);
+      console.log('Updating minutes used with recording time:', recordingTime);
+      const updated = await updateMinutesUsed(user.id, recordingTime);
       
       if (!updated) {
         throw new Error('Failed to update minutes used');
@@ -274,7 +314,7 @@ export function NewConsultation() {
       });
 
       const audioBlob = new Blob(audioChunksRef.current, { 
-        type: 'audio/webm;codecs=opus'
+        type: mediaRecorderRef.current?.mimeType || 'audio/webm;codecs=opus'
       });
 
       try {
@@ -298,6 +338,76 @@ export function NewConsultation() {
       startRecording();
     } else {
       stopRecording();
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!selectedPatient) {
+      setError('Seleziona un paziente prima di caricare un file');
+      return;
+    }
+
+    // Check file type
+    if (!file.type.startsWith('audio/')) {
+      setError('Il file deve essere un file audio');
+      return;
+    }
+
+    // Check file size (max 100MB)
+    if (file.size > 100 * 1024 * 1024) {
+      setError('Il file non può superare i 100MB');
+      return;
+    }
+
+    try {
+      if (!user?.id) throw new Error('User not authenticated');
+      
+      const hasMinutes = await checkMinutesAvailable(user.id, 60);
+      if (!hasMinutes) {
+        setError('Minuti disponibili esauriti. Per continuare a registrare consultazioni, è necessario aggiornare il piano di abbonamento.');
+        return;
+      }
+
+      setIsTranscribing(true);
+      setProcessingStep(1);
+      setError(null);
+
+      // Calcola la durata approssimativa del file audio (in secondi)
+      const audioElement = document.createElement('audio');
+      audioElement.src = URL.createObjectURL(file);
+      
+      await new Promise((resolve, reject) => {
+        audioElement.addEventListener('loadedmetadata', () => {
+          setRecordingTime(Math.ceil(audioElement.duration));
+          resolve(null);
+        });
+        audioElement.addEventListener('error', (e) => {
+          console.error('Error loading audio:', e);
+          reject(new Error('Errore nel caricamento del file audio'));
+        });
+      });
+
+      // Trascrivi il file audio
+      console.log('Starting transcription of file:', { name: file.name, type: file.type, size: file.size });
+      const text = await transcribeAudio(file);
+      console.log('Transcription completed:', { length: text.length });
+      setTranscription(text);
+
+      // Processa la consultazione
+      await processConsultation(text);
+    } catch (error) {
+      const err = error as Error;
+      console.error('File upload error:', err);
+      setError(`Elaborazione fallita: ${err.message}`);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } finally {
+      setIsTranscribing(false);
+      setProcessingStep(0);
     }
   };
 
@@ -382,130 +492,82 @@ export function NewConsultation() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <button
-            disabled={!gdprConsent || !hasMicrophonePermission || isTranscribing || isAnalyzing || !selectedPatient}
-            onClick={toggleRecording}
-            className={`flex items-center justify-center gap-3 p-8 rounded-lg border-2 border-dashed transition-colors ${
-              isRecording
-                ? 'bg-red-50 border-red-300 text-red-700'
-                : gdprConsent && hasMicrophonePermission && !isTranscribing && !isAnalyzing && selectedPatient
-                ? 'border-blue-300 hover:border-blue-400 text-blue-700'
-                : 'border-gray-200 text-gray-400'
-            }`}
-          >
-            <Mic className="h-8 w-8" />
-            <span className="text-lg font-medium">
-              {isRecording ? 'Ferma Registrazione' : 'Avvia Registrazione'}
-            </span>
-          </button>
+          <div className="space-y-4">
+            <button
+              disabled={!gdprConsent || !hasMicrophonePermission || isTranscribing || isAnalyzing || !selectedPatient}
+              onClick={toggleRecording}
+              className={`
+                w-full px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2
+                ${isRecording
+                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }
+                disabled:opacity-50 disabled:cursor-not-allowed
+              `}
+            >
+              <Mic className={`h-5 w-5 ${isRecording ? 'animate-pulse' : ''}`} />
+              {isRecording ? `Registrazione in corso (${formatTime(recordingTime)})` : 'Avvia Registrazione'}
+            </button>
 
-          <label
-            className={`flex items-center justify-center gap-3 p-8 rounded-lg border-2 border-dashed cursor-pointer transition-colors ${
-              gdprConsent && !isTranscribing && !isAnalyzing && selectedPatient
-                ? 'border-blue-300 hover:border-blue-400 text-blue-700'
-                : 'border-gray-200 text-gray-400'
-            }`}
-          >
-            <input
-              type="file"
-              accept="audio/*"
-              disabled={!gdprConsent || isTranscribing || isAnalyzing || !selectedPatient}
-              className="hidden"
-              onChange={(e) => {
-                console.log(e.target.files?.[0]);
-              }}
-            />
-            <Upload className="h-8 w-8" />
-            <span className="text-lg font-medium">Carica File Audio</span>
-          </label>
-        </div>
-
-        {isRecording && (
-          <div className="mt-6">
-            <div className="p-4 bg-red-50 rounded-lg flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 bg-red-500 rounded-full animate-pulse" />
-                <span className="text-red-700 font-medium">Registrazione in corso...</span>
-              </div>
-              <span className="text-red-700" id="recording-time">
-                {formatTime(recordingTime)}
-              </span>
+            <div className="relative">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept="audio/*"
+                className="hidden"
+                disabled={isTranscribing || isAnalyzing || !selectedPatient || !gdprConsent}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isTranscribing || isAnalyzing || !selectedPatient || !gdprConsent}
+                className="w-full px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isTranscribing ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Trascrizione in corso...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-5 w-5" />
+                    Carica Audio
+                  </>
+                )}
+              </button>
             </div>
-            
+          </div>
+
+          <div className="flex items-center justify-center">
             <canvas
               ref={canvasRef}
-              className="w-full h-32 rounded-lg bg-white"
-              width={800}
-              height={128}
+              className="w-full h-32 bg-gray-50 rounded-lg"
             />
           </div>
-        )}
+        </div>
 
-        {(isTranscribing || isAnalyzing || isSaving || processingStep > 0) && (
-          <div className="mt-6 text-sm text-gray-500 flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>{processingSteps[processingStep]}</span>
-          </div>
-        )}
-
-        {transcription && (
+        {(isTranscribing || isAnalyzing) && (
           <div className="mt-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Trascrizione</h3>
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-gray-700 whitespace-pre-wrap">{transcription}</p>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                <span className="text-sm font-medium text-gray-700">
+                  {processingSteps[processingStep]}...
+                </span>
+              </div>
+              {uploadProgress > 0 && (
+                <span className="text-sm text-gray-500">
+                  {uploadProgress}%
+                </span>
+              )}
             </div>
-          </div>
-        )}
-
-        {report && (
-          <div className="mt-6 space-y-4">
-            <h3 className="text-lg font-medium text-gray-900">Referto Medico</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Motivo della Visita</h4>
-                <p className="text-gray-600">{report.motivoVisita}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Storia Medica e Familiare</h4>
-                <p className="text-gray-600">{report.storiaMedica}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Storia Ponderale</h4>
-                <p className="text-gray-600">{report.storiaPonderale}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Abitudini Alimentari</h4>
-                <p className="text-gray-600">{report.abitudiniAlimentari}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Attività Fisica</h4>
-                <p className="text-gray-600">{report.attivitaFisica}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Fattori Psicologici/Motivazionali</h4>
-                <p className="text-gray-600">{report.fattoriPsi}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Esami e Parametri Rilevanti</h4>
-                <p className="text-gray-600">{report.esamiParametri}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Punti Critici e Rischi</h4>
-                <p className="text-gray-600">{report.puntiCritici}</p>
-              </div>
-
-              <div>
-                <h4 className="font-medium text-gray-700 mb-2">Note dello Specialista</h4>
-                <p className="text-gray-600">{report.noteSpecialista}</p>
-              </div>
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                style={{
+                  width: `${uploadProgress > 0 ? uploadProgress : (processingStep + 1) * 25}%`
+                }}
+              />
             </div>
           </div>
         )}

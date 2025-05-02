@@ -26,20 +26,18 @@ function generatePrompt(consultation: ConsultationData) {
       role: 'system',
       content: `Sei un assistente specializzato nell'analisi di consultazioni mediche in ambito nutrizionale. 
       Il tuo compito è analizzare la trascrizione della consultazione e creare un report strutturato.
-      Rispondi ESCLUSIVAMENTE in formato JSON valido con i seguenti campi, senza testo introduttivo o conclusivo:
+      Rispondi SOLO in formato JSON con i seguenti campi:
       {
         "motivoVisita": "Motivo principale della visita",
         "storiaMedica": "Storia medica rilevante",
         "storiaPonderale": "Storia del peso e variazioni",
-        "abitudiniAlimentari": "Abitudini alimentari attuali", 
+        "abitudiniAlimentari": "Abitudini alimentari attuali",
         "attivitaFisica": "Livello di attività fisica",
         "fattoriPsi": "Fattori psicologici rilevanti",
         "esamiParametri": "Esami e parametri clinici",
         "puntiCritici": "Punti critici identificati",
         "noteSpecialista": "Note aggiuntive dello specialista"
       }
-      
-      IMPORTANTE: La tua risposta deve contenere SOLO il JSON, nessun testo aggiuntivo prima o dopo.
       Se un'informazione non è disponibile, usa "N.A."`
     },
     {
@@ -55,35 +53,8 @@ function generatePrompt(consultation: ConsultationData) {
 
 function parseAIResponse(response: string): MedicalReport {
   try {
-    // Prima prova con parsing diretto
-    try {
-      return JSON.parse(response);
-    } catch (directError) {
-      console.log('Errore nel parsing diretto JSON, tentativo di pulizia:', directError.message);
-      
-      // Cerca di estrarre JSON valido dalla risposta usando regex
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        console.log('Trovato possibile JSON, tentativo di parsing');
-        return JSON.parse(jsonMatch[0]);
-      }
-      
-      // Se non troviamo JSON, creiamo un report di fallback
-      console.log('Impossibile trovare JSON valido, creazione report fallback');
-      return {
-        motivoVisita: "Errore di parsing: " + response.substring(0, 100) + "...",
-        storiaMedica: "N.A.",
-        storiaPonderale: "N.A.",
-        abitudiniAlimentari: "N.A.",
-        attivitaFisica: "N.A.",
-        fattoriPsi: "N.A.",
-        esamiParametri: "N.A.",
-        puntiCritici: "N.A.",
-        noteSpecialista: "Errore: impossibile analizzare la risposta. Per favore riprova o verifica la trascrizione."
-      };
-    }
+    return JSON.parse(response);
   } catch (error) {
-    console.error('Critical error during parsing:', error);
     throw new Error('Failed to parse AI response as JSON');
   }
 }

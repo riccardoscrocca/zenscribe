@@ -106,6 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         setUser(null);
+        localStorage.clear();
         navigate('/');
         return;
       }
@@ -114,10 +115,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) console.error('Sign out error:', error);
 
       setUser(null);
+      localStorage.clear();
       navigate('/');
     } catch (error) {
       console.error('Sign out error:', error);
       setUser(null);
+      localStorage.clear();
       navigate('/');
     }
   };

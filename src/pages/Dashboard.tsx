@@ -37,6 +37,7 @@ interface DashboardStats {
   }>;
   recentNotes: Array<{
     id: string;
+    patient_id: string;
     title: string;
     created_at: string;
     patient_name: string;
@@ -152,6 +153,7 @@ export function Dashboard() {
         .from('consultations')
         .select(`
           id,
+          patient_id,
           created_at,
           motivo_visita,
           duration_seconds,
@@ -173,6 +175,7 @@ export function Dashboard() {
         recentPatients: recentPatients || [],
         recentNotes: (recentNotes || []).map(note => ({
           id: note.id,
+          patient_id: note.patient_id,
           title: note.motivo_visita || 'Consultazione',
           created_at: note.created_at,
           patient_name: note.patient ? `${note.patient.first_name} ${note.patient.last_name}` : 'Unknown',
@@ -301,32 +304,36 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="p-6 border-b border-gray-100">
-            <h2 className="text-lg font-semibold text-gray-900">Note Recenti</h2>
-            <p className="text-sm text-gray-500">Le tue note mediche create di recente</p>
+        <div className="col-span-1 md:col-span-1 bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-100">
+            <h3 className="text-lg font-medium text-gray-900">Pazienti Recenti</h3>
           </div>
           <div className="divide-y divide-gray-100">
-            {stats.recentNotes.length === 0 ? (
-              <div className="p-6 text-center text-gray-500">
-                Nessuna nota recente trovata
+            {stats.recentPatients.length === 0 ? (
+              <div className="px-6 py-5 text-sm text-gray-500">
+                Nessun paziente recente.
               </div>
             ) : (
-              stats.recentNotes.map((note) => (
-                <div key={note.id} className="p-6 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-900">{note.title}</h3>
-                      <p className="text-sm text-gray-500">{note.patient_name}</p>
-                      {note.duration_seconds && (
-                        <p className="text-xs text-gray-400 mt-1">
-                          Durata: {Math.round(note.duration_seconds / 60)} minuti
-                        </p>
-                      )}
+              stats.recentPatients.map((patient) => (
+                <div 
+                  key={patient.id} 
+                  className="px-6 py-4 hover:bg-blue-50 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/app/patients/${patient.id}`)}
+                >
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                        <Users className="h-5 w-5 text-blue-600" />
+                      </div>
                     </div>
-                    <span className="text-sm text-gray-500">
-                      {formatDate(note.created_at)}
-                    </span>
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-900">
+                        {patient.first_name} {patient.last_name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {formatDate(patient.created_at)}
+                      </p>
+                    </div>
                   </div>
                 </div>
               ))
@@ -334,32 +341,46 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="p-6 border-b border-gray-100">
-            <h2 className="text-lg font-semibold text-gray-900">Pazienti Recenti</h2>
-            <p className="text-sm text-gray-500">I tuoi pazienti aggiunti di recente</p>
+        <div className="col-span-1 md:col-span-2 bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-100">
+            <h3 className="text-lg font-medium text-gray-900">Consultazioni Recenti</h3>
           </div>
           <div className="divide-y divide-gray-100">
-            {stats.recentPatients.length === 0 ? (
-              <div className="p-6 text-center text-gray-500">
-                Nessun paziente recente trovato
+            {stats.recentNotes.length === 0 ? (
+              <div className="px-6 py-5 text-sm text-gray-500">
+                Nessuna consultazione recente.
               </div>
             ) : (
-              stats.recentPatients.map((patient) => (
-                <div key={patient.id} className="p-6 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 bg-gray-100 rounded-full flex items-center justify-center">
-                        <Users className="h-5 w-5 text-gray-500" />
+              stats.recentNotes.map((note) => (
+                <div 
+                  key={note.id} 
+                  className="px-6 py-4 hover:bg-blue-50 transition-colors cursor-pointer"
+                  onClick={() => {
+                    navigate(`/app/patients/${note.patient_id}`, { state: { highlightNoteId: note.id } });
+                  }}
+                >
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0 mt-1">
+                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                        <FileText className="h-4 w-4 text-green-600" />
                       </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-900">
-                          {patient.first_name} {patient.last_name}
-                        </h3>
-                        <p className="text-sm text-gray-500">
-                          Aggiunto il {formatDate(patient.created_at)}
+                    </div>
+                    <div className="ml-3 flex-1">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-gray-900">
+                          {note.patient_name}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {formatDate(note.created_at)}
                         </p>
                       </div>
+                      <p className="mt-1 text-sm text-gray-600 line-clamp-2">
+                        {note.motivo_visita || (
+                          note.transcription ? (
+                            note.transcription.substring(0, 100) + '...'
+                          ) : 'Consultazione'
+                        )}
+                      </p>
                     </div>
                   </div>
                 </div>
