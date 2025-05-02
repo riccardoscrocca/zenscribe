@@ -260,6 +260,17 @@ export function NewConsultation() {
       setIsSaving(true);
       const currentRecordingTime = recordingTime;
       console.log('Saving consultation with recording time:', currentRecordingTime);
+      
+      // Prima aggiorniamo i minuti
+      console.log('Updating minutes used with recording time:', currentRecordingTime);
+      const updated = await updateMinutesUsed(user.id, currentRecordingTime);
+      console.log('Minutes update result:', { updated, recordingTime: currentRecordingTime });
+      
+      if (!updated) {
+        throw new Error('Failed to update minutes used');
+      }
+
+      // Poi salviamo la consultazione
       await saveConsultation(
         {
           patientId: selectedPatient,
@@ -272,14 +283,6 @@ export function NewConsultation() {
         visitType,
         currentRecordingTime
       );
-
-      console.log('Updating minutes used with recording time:', currentRecordingTime);
-      const updated = await updateMinutesUsed(user.id, currentRecordingTime);
-      console.log('Minutes update result:', { updated, recordingTime: currentRecordingTime });
-      
-      if (!updated) {
-        throw new Error('Failed to update minutes used');
-      }
       
       setProcessingStep(4);
       setIsSaving(false);
@@ -395,7 +398,7 @@ export function NewConsultation() {
       
       let duration = 0;
       await new Promise((resolve, reject) => {
-        audioElement.addEventListener('loadedmetadata', () => {
+        audioElement.addEventListener('loadedmetadata', async () => {
           duration = Math.ceil(audioElement.duration);
           console.log('Durata audio rilevata:', duration, 'secondi');
           setRecordingTime(duration);
@@ -406,38 +409,23 @@ export function NewConsultation() {
           console.error('Error loading audio:', e);
           reject(new Error('Errore nel caricamento del file audio'));
         });
-        
-        // Timeout per gestire problemi di caricamento
-        setTimeout(() => {
-          reject(new Error('Timeout nel caricamento del file audio'));
-        }, 10000); // 10 secondi di timeout
       });
 
       // Determina se è un file MP3
       const isMP3 = file.type.includes('mp3') || file.type.includes('mpeg') || file.name.toLowerCase().endsWith('.mp3');
       
-      // Debug aggiuntivo
-      console.log('Dettagli file per decisione funzione:', { 
-        nome: file.name, 
-        tipo: file.type, 
-        estensione: file.name.split('.').pop()?.toLowerCase(), 
-        isMP3,
-        endsWith_mp3: file.name.toLowerCase().endsWith('.mp3'),
-        includes_mp3: file.type.includes('mp3'),
-        includes_mpeg: file.type.includes('mpeg')
+      console.log('Dettagli trascrizione:', { 
+        durata: duration,
+        tipo: file.type,
+        isMP3
       });
-      
-      // Usa la funzione dedicata per i file MP3, altrimenti usa la funzione standard
-      console.log(`Inizio trascrizione via API ${isMP3 ? '(utilizzando funzione dedicata per MP3)' : '(usando funzione standard)'}...`);
       
       let text;
       try {
         if (isMP3) {
-          // Utilizzo la funzione dedicata ottimizzata per MP3
           console.log('CHIAMATA A uploadAndTranscribeFileDedicated');
           text = await uploadAndTranscribeFileDedicated(file);
         } else {
-          // Per altri tipi di file, utilizzo la funzione standard
           console.log('CHIAMATA A uploadAndTranscribeFile');
           text = await uploadAndTranscribeFile(file);
         }
@@ -446,7 +434,7 @@ export function NewConsultation() {
         setTranscription(text);
   
         // Processa la consultazione con la durata del file
-        console.log('Inizio analisi della consultazione con durata:', duration);
+        console.log('Inizio processConsultation con durata:', duration);
         await processConsultation(text);
       } catch (transcriptionError) {
         console.error('Errore durante la trascrizione:', transcriptionError);
