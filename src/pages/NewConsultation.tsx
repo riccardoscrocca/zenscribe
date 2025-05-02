@@ -258,7 +258,8 @@ export function NewConsultation() {
       setProcessingStep(3);
 
       setIsSaving(true);
-      console.log('Saving consultation with recording time:', recordingTime);
+      const currentRecordingTime = recordingTime;
+      console.log('Saving consultation with recording time:', currentRecordingTime);
       await saveConsultation(
         {
           patientId: selectedPatient,
@@ -269,12 +270,12 @@ export function NewConsultation() {
         report,
         gdprConsent,
         visitType,
-        recordingTime
+        currentRecordingTime
       );
 
-      console.log('Updating minutes used with recording time:', recordingTime);
-      const updated = await updateMinutesUsed(user.id, recordingTime);
-      console.log('Minutes update result:', { updated, recordingTime });
+      console.log('Updating minutes used with recording time:', currentRecordingTime);
+      const updated = await updateMinutesUsed(user.id, currentRecordingTime);
+      console.log('Minutes update result:', { updated, recordingTime: currentRecordingTime });
       
       if (!updated) {
         throw new Error('Failed to update minutes used');
@@ -392,9 +393,10 @@ export function NewConsultation() {
       
       console.log('Audio element creato, calcolo durata...');
       
+      let duration = 0;
       await new Promise((resolve, reject) => {
         audioElement.addEventListener('loadedmetadata', () => {
-          const duration = Math.ceil(audioElement.duration);
+          duration = Math.ceil(audioElement.duration);
           console.log('Durata audio rilevata:', duration, 'secondi');
           setRecordingTime(duration);
           resolve(null);
@@ -443,8 +445,8 @@ export function NewConsultation() {
         console.log('Trascrizione completata, lunghezza:', text.length);
         setTranscription(text);
   
-        // Processa la consultazione
-        console.log('Inizio analisi della consultazione...');
+        // Processa la consultazione con la durata del file
+        console.log('Inizio analisi della consultazione con durata:', duration);
         await processConsultation(text);
       } catch (transcriptionError) {
         console.error('Errore durante la trascrizione:', transcriptionError);
