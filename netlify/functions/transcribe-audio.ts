@@ -53,7 +53,12 @@ export const handler: Handler = async (event) => {
         });
 
         busboy.on('file', (fieldname, file, info) => {
-          console.log('Processing file:', { fieldname, filename: info.filename, encoding: info.encoding, mimeType: info.mimeType });
+          console.log('Processing file:', { 
+            fieldname, 
+            filename: info.filename, 
+            encoding: info.encoding, 
+            mimeType: info.mimeType 
+          });
           fileMimeType = info.mimeType;
           const chunks: Buffer[] = [];
 
@@ -63,7 +68,7 @@ export const handler: Handler = async (event) => {
 
           file.on('end', () => {
             fileBuffer = Buffer.concat(chunks);
-            console.log('File processing complete. Size:', fileBuffer.length);
+            console.log('File processing complete. Size:', fileBuffer.length, 'MIME type:', fileMimeType);
           });
         });
 
@@ -73,9 +78,11 @@ export const handler: Handler = async (event) => {
 
         busboy.on('finish', () => {
           if (!fileBuffer) {
+            console.error('No file buffer found in form data');
             reject(new Error('No file found in form data'));
             return;
           }
+          console.log('Busboy processing finished successfully');
           resolve({ buffer: fileBuffer, mimeType: fileMimeType });
         });
 
@@ -95,6 +102,7 @@ export const handler: Handler = async (event) => {
             reject(error);
           }
         } else {
+          console.error('No body provided in the request');
           reject(new Error('No body provided'));
         }
       });

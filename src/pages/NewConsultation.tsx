@@ -345,6 +345,12 @@ export function NewConsultation() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    console.log('File selezionato:', { 
+      name: file.name, 
+      type: file.type, 
+      size: file.size 
+    });
+
     if (!selectedPatient) {
       setError('Seleziona un paziente prima di caricare un file');
       return;
@@ -371,32 +377,47 @@ export function NewConsultation() {
         return;
       }
 
+      // Imposta lo stato di trascrizione
       setIsTranscribing(true);
       setProcessingStep(1);
       setError(null);
+      setTranscription('');
+      
+      console.log('Inizio trascrizione del file audio');
 
       // Calcola la durata approssimativa del file audio (in secondi)
       const audioElement = document.createElement('audio');
       audioElement.src = URL.createObjectURL(file);
       
+      console.log('Audio element creato, calcolo durata...');
+      
       await new Promise((resolve, reject) => {
         audioElement.addEventListener('loadedmetadata', () => {
-          setRecordingTime(Math.ceil(audioElement.duration));
+          const duration = Math.ceil(audioElement.duration);
+          console.log('Durata audio rilevata:', duration, 'secondi');
+          setRecordingTime(duration);
           resolve(null);
         });
+        
         audioElement.addEventListener('error', (e) => {
           console.error('Error loading audio:', e);
           reject(new Error('Errore nel caricamento del file audio'));
         });
+        
+        // Timeout per gestire problemi di caricamento
+        setTimeout(() => {
+          reject(new Error('Timeout nel caricamento del file audio'));
+        }, 10000); // 10 secondi di timeout
       });
 
       // Trascrivi il file audio
-      console.log('Starting transcription of file:', { name: file.name, type: file.type, size: file.size });
+      console.log('Inizio trascrizione via API...');
       const text = await transcribeAudio(file);
-      console.log('Transcription completed:', { length: text.length });
+      console.log('Trascrizione completata, lunghezza:', text.length);
       setTranscription(text);
 
       // Processa la consultazione
+      console.log('Inizio analisi della consultazione...');
       await processConsultation(text);
     } catch (error) {
       const err = error as Error;
