@@ -260,17 +260,8 @@ export function NewConsultation() {
       setIsSaving(true);
       const currentRecordingTime = recordingTime;
       console.log('Saving consultation with recording time:', currentRecordingTime);
-      
-      // Prima aggiorniamo i minuti
-      console.log('Updating minutes used with recording time:', currentRecordingTime);
-      const updated = await updateMinutesUsed(user.id, currentRecordingTime);
-      console.log('Minutes update result:', { updated, recordingTime: currentRecordingTime });
-      
-      if (!updated) {
-        throw new Error('Failed to update minutes used');
-      }
 
-      // Poi salviamo la consultazione
+      // Salva la consultazione
       await saveConsultation(
         {
           patientId: selectedPatient,
@@ -397,19 +388,24 @@ export function NewConsultation() {
       console.log('Audio element creato, calcolo durata...');
       
       let duration = 0;
-      await new Promise((resolve, reject) => {
-        audioElement.addEventListener('loadedmetadata', async () => {
-          duration = Math.ceil(audioElement.duration);
-          console.log('Durata audio rilevata:', duration, 'secondi');
-          setRecordingTime(duration);
-          resolve(null);
+      try {
+        await new Promise((resolve, reject) => {
+          audioElement.addEventListener('loadedmetadata', () => {
+            duration = Math.ceil(audioElement.duration);
+            console.log('Durata audio rilevata:', duration, 'secondi');
+            setRecordingTime(duration);
+            resolve(null);
+          });
+          
+          audioElement.addEventListener('error', (e) => {
+            console.error('Error loading audio:', e);
+            reject(new Error('Errore nel caricamento del file audio'));
+          });
         });
-        
-        audioElement.addEventListener('error', (e) => {
-          console.error('Error loading audio:', e);
-          reject(new Error('Errore nel caricamento del file audio'));
-        });
-      });
+      } catch (error) {
+        console.error('Errore nel calcolo della durata:', error);
+        throw new Error('Impossibile determinare la durata del file audio');
+      }
 
       // Determina se è un file MP3
       const isMP3 = file.type.includes('mp3') || file.type.includes('mpeg') || file.name.toLowerCase().endsWith('.mp3');
@@ -417,9 +413,10 @@ export function NewConsultation() {
       console.log('Dettagli trascrizione:', { 
         durata: duration,
         tipo: file.type,
-        isMP3
+        isMP3,
+        recordingTime
       });
-      
+
       let text;
       try {
         if (isMP3) {
@@ -432,7 +429,18 @@ export function NewConsultation() {
         
         console.log('Trascrizione completata, lunghezza:', text.length);
         setTranscription(text);
-  
+
+        // Aggiorna i minuti prima di processare la consultazione
+        if (!user?.id) throw new Error('User not authenticated');
+        
+        console.log('Aggiornamento minuti con durata:', duration);
+        const updated = await updateMinutesUsed(user.id, duration);
+        console.log('Risultato aggiornamento minuti:', { updated, duration });
+        
+        if (!updated) {
+          throw new Error('Failed to update minutes used');
+        }
+
         // Processa la consultazione con la durata del file
         console.log('Inizio processConsultation con durata:', duration);
         await processConsultation(text);
@@ -446,6 +454,18 @@ export function NewConsultation() {
             text = await uploadAndTranscribeFile(file);
             console.log('Trascrizione con fallback completata, lunghezza:', text.length);
             setTranscription(text);
+
+            // Aggiorna i minuti anche nel caso di fallback
+            if (!user?.id) throw new Error('User not authenticated');
+            
+            console.log('Aggiornamento minuti (fallback) con durata:', duration);
+            const updated = await updateMinutesUsed(user.id, duration);
+            console.log('Risultato aggiornamento minuti (fallback):', { updated, duration });
+            
+            if (!updated) {
+              throw new Error('Failed to update minutes used');
+            }
+
             await processConsultation(text);
           } catch (fallbackError) {
             console.error('Errore anche nel fallback:', fallbackError);
