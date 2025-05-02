@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Mic, Upload, AlertCircle, Loader2, UserPlus, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { drawWaveform } from '../lib/audioVisualizer';
-import { transcribeAudio } from '../lib/transcription';
+import { transcribeAudio, uploadAndTranscribeFile } from '../lib/transcription';
 import { analyzeConsultation, saveConsultation } from '../lib/aiAgent';
 import { supabase } from '../lib/supabase';
 import type { MedicalReport } from '../lib/aiInstructions';
@@ -410,9 +410,9 @@ export function NewConsultation() {
         }, 10000); // 10 secondi di timeout
       });
 
-      // Trascrivi il file audio
+      // Trascrivi il file audio usando la funzione specifica per l'upload
       console.log('Inizio trascrizione via API...');
-      const text = await transcribeAudio(file);
+      const text = await uploadAndTranscribeFile(file);
       console.log('Trascrizione completata, lunghezza:', text.length);
       setTranscription(text);
 
