@@ -53,6 +53,7 @@ function AppRoutes() {
         <Route path="patients" element={<Patients />} />
         <Route path="patients/:id" element={<PatientDetails />} />
         <Route path="new-patient" element={<AddPatient />} />
+        <Route path="consultation/new" element={<Navigate to="/app/new-consultation" replace />} />
         <Route path="new-consultation" element={<NewConsultation />} />
         <Route path="history" element={<ConsultationHistory />} />
         <Route path="subscription" element={<Subscription />} />
