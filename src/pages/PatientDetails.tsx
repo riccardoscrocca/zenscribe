@@ -473,7 +473,7 @@ export function PatientDetails() {
         
         <div className="flex gap-2">
           <a
-            href={`/app/new-consultation?patientId=${id}`}
+            href={`https://zenscribe.it/app/new-consultation?patientId=${id}`}
             className="px-4 py-2 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 flex items-center no-underline"
           >
             <PencilLine className="h-4 w-4 mr-2" />
