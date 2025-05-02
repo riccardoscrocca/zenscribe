@@ -472,13 +472,13 @@ export function PatientDetails() {
         </button>
         
         <div className="flex gap-2">
-          <button
-            onClick={() => navigate('/app/consultation/new')}
-            className="px-4 py-2 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 flex items-center"
+          <a
+            href={`https://zenscribe.it/app/new-consultation?patientId=${id}`}
+            className="px-4 py-2 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 flex items-center no-underline"
           >
             <PencilLine className="h-4 w-4 mr-2" />
             Nuova Consultazione
-          </button>
+          </a>
           
           <button
             onClick={() => setIsEditing(true)}

@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 // Funzione di log avanzata per il debugging
 const logDebug = (label: string, data?: any) => {
   const timestamp = new Date().toISOString();
-  const logPrefix = `[${timestamp}] [TRANSCRIBE-AUDIO]`;
+  const logPrefix = `[${timestamp}] [UPLOAD-TRANSCRIBE]`;
   
   if (data) {
     try {
@@ -32,23 +32,39 @@ const logDebug = (label: string, data?: any) => {
 };
 
 export const handler: Handler = async (event) => {
+  // Genera un ID univoco per la richiesta per correlazione nei log
   const requestId = crypto.randomBytes(4).toString('hex');
   logDebug(`Inizio richiesta ${requestId}`);
   
+  // Gestisci le richieste OPTIONS (preflight CORS)
+  if (event.httpMethod === 'OPTIONS') {
+    logDebug(`Richiesta OPTIONS ricevuta ${requestId}`);
+    return {
+      statusCode: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Max-Age': '86400'
+      },
+      body: ''
+    };
+  }
+  
   try {
-    // Logging iniziale per ogni richiesta
+    // Log iniziali per ogni richiesta
     logDebug(`Headers richiesta ${requestId}`, event.headers);
     logDebug(`Metodo richiesta ${requestId}`, event.httpMethod);
-    logDebug(`Dimensione body ${requestId}`, event.body ? Buffer.from(event.body, 'base64').length : 0);
-
+    
     if (event.httpMethod !== 'POST') {
-      logDebug(`Metodo non consentito ${requestId}`, event.httpMethod);
+      logDebug(`Metodo non consentito ${requestId}: ${event.httpMethod}`);
       return {
         statusCode: 405,
-        body: JSON.stringify({ error: 'Method Not Allowed' }),
+        body: JSON.stringify({ error: 'Method Not Allowed', requestId }),
       };
     }
 
+    // Verifica la chiave API di OpenAI
     const apiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
     logDebug(`Verifica API key ${requestId}`, {
       present: !!apiKey,
@@ -64,7 +80,8 @@ export const handler: Handler = async (event) => {
         statusCode: 500,
         body: JSON.stringify({ 
           error: 'Invalid OpenAI API key format',
-          details: 'The API key should start with sk-'
+          details: 'The API key should start with sk-',
+          requestId
         }),
       };
     }
@@ -74,7 +91,7 @@ export const handler: Handler = async (event) => {
       logDebug(`Nessun body trovato nella richiesta ${requestId}`);
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'No request body provided' }),
+        body: JSON.stringify({ error: 'No request body provided', requestId }),
       };
     }
 
@@ -82,26 +99,39 @@ export const handler: Handler = async (event) => {
       logDebug(`Nessun content-type trovato nella richiesta ${requestId}`);
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'No content-type header provided' }),
+        body: JSON.stringify({ error: 'No content-type header provided', requestId }),
       };
     }
 
-    logDebug(`Content-type richiesta ${requestId}`, event.headers['content-type']);
+    // Verifica che il content-type sia multipart/form-data
+    const contentType = event.headers['content-type'];
+    if (!contentType.includes('multipart/form-data')) {
+      logDebug(`Content-type non valido ${requestId}: ${contentType}`);
+      return {
+        statusCode: 400, 
+        body: JSON.stringify({ 
+          error: 'Invalid content type', 
+          details: 'Content-type must be multipart/form-data',
+          requestId
+        })
+      };
+    }
+
+    logDebug(`Elaborazione richiesta con content-type ${requestId}: ${contentType}`);
 
     // Funzione per parsare il multipart form data
     const parseFormData = () => {
-      return new Promise<{ buffer: Buffer; mimeType: string; fileName: string }>((resolve, reject) => {
+      return new Promise<{ buffer: Buffer; mimeType: string; fileName: string; clientId?: string }>((resolve, reject) => {
         let fileBuffer: Buffer | null = null;
         let fileMimeType = '';
         let fileName = '';
+        let clientId = '';
         
         // Configurazione di Busboy con impostazioni più permissive
-        logDebug(`Inizializzazione Busboy ${requestId}`, { 
-          contentType: event.headers['content-type'] 
-        });
+        logDebug(`Inizializzazione Busboy ${requestId}`, { contentType });
         
         const busboy = Busboy({ 
-          headers: { 'content-type': event.headers['content-type'] || '' },
+          headers: { 'content-type': contentType },
           limits: {
             fileSize: 100 * 1024 * 1024, // 100MB
             files: 1
@@ -112,7 +142,7 @@ export const handler: Handler = async (event) => {
           fileName = info.filename || '';
           fileMimeType = info.mimeType || '';
           
-          logDebug(`Processamento file iniziato ${requestId}`, { 
+          logDebug(`File ricevuto ${requestId}`, { 
             fieldname, 
             filename: fileName, 
             encoding: info.encoding, 
@@ -125,9 +155,11 @@ export const handler: Handler = async (event) => {
             chunks.push(data);
             // Log per monitorare il progresso
             if (chunks.length % 10 === 0) {
+              const bytesReceived = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
               logDebug(`Progresso ricezione file ${requestId}`, {
                 chunks: chunks.length,
-                bytesRicevuti: chunks.reduce((acc, chunk) => acc + chunk.length, 0)
+                bytesRicevuti: bytesReceived,
+                bytesRicevutiMB: (bytesReceived / (1024 * 1024)).toFixed(2) + ' MB'
               });
             }
           });
@@ -144,13 +176,18 @@ export const handler: Handler = async (event) => {
               size: fileBuffer.length, 
               mimeType: fileMimeType,
               sizeKB: Math.round(fileBuffer.length / 1024),
-              sizeMB: (fileBuffer.length / (1024 * 1024)).toFixed(2)
+              sizeMB: (fileBuffer.length / (1024 * 1024)).toFixed(2) + ' MB'
             });
           });
         });
 
         busboy.on('field', (fieldname, value) => {
           logDebug(`Campo form ricevuto ${requestId}`, { fieldname, value });
+          // Salviamo l'ID client se presente
+          if (fieldname === 'session_id' || fieldname === 'client_id') {
+            clientId = value;
+            logDebug(`ID client ricevuto ${requestId}: ${clientId}`);
+          }
         });
 
         busboy.on('finish', () => {
@@ -166,25 +203,26 @@ export const handler: Handler = async (event) => {
             fileName
           });
           
+          // Rilevamento tipo file
           if (!fileMimeType || fileMimeType === 'application/octet-stream') {
             // Se non abbiamo un MIME type valido, proviamo a determinarlo dal nome del file
             if (fileName.toLowerCase().endsWith('.mp3')) {
-              logDebug(`File MP3 rilevato dal nome file ${requestId}`, fileName);
+              logDebug(`File MP3 rilevato dal nome file ${requestId}: ${fileName}`);
               fileMimeType = 'audio/mpeg';
             } else if (fileName.toLowerCase().endsWith('.wav')) {
-              logDebug(`File WAV rilevato dal nome file ${requestId}`, fileName);
+              logDebug(`File WAV rilevato dal nome file ${requestId}: ${fileName}`);
               fileMimeType = 'audio/wav';
             } else if (fileName.toLowerCase().endsWith('.m4a')) {
-              logDebug(`File M4A rilevato dal nome file ${requestId}`, fileName);
+              logDebug(`File M4A rilevato dal nome file ${requestId}: ${fileName}`);
               fileMimeType = 'audio/mp4';
             } else if (fileName.toLowerCase().endsWith('.webm')) {
-              logDebug(`File WebM rilevato dal nome file ${requestId}`, fileName);
+              logDebug(`File WebM rilevato dal nome file ${requestId}: ${fileName}`);
               fileMimeType = 'audio/webm';
             }
           }
           
           logDebug(`Busboy processing completato ${requestId}`);
-          resolve({ buffer: fileBuffer, mimeType: fileMimeType, fileName });
+          resolve({ buffer: fileBuffer, mimeType: fileMimeType, fileName, clientId });
         });
 
         busboy.on('error', (error) => {
@@ -195,7 +233,7 @@ export const handler: Handler = async (event) => {
         if (event.body) {
           try {
             const buffer = Buffer.from(event.body, 'base64');
-            logDebug(`Dimensione body decodificato ${requestId}`, buffer.length);
+            logDebug(`Dimensione body decodificato ${requestId}: ${buffer.length} bytes`);
             const stream = Readable.from(buffer);
             logDebug(`Stream creato, piping a Busboy ${requestId}`);
             stream.pipe(busboy);
@@ -212,37 +250,38 @@ export const handler: Handler = async (event) => {
 
     // Ottieni il file audio dal form data
     logDebug(`Inizio parsing form data ${requestId}`);
-    const { buffer: audioBuffer, mimeType: fileMimeType, fileName } = await parseFormData();
-    logDebug(`Form data parsed successfully ${requestId}`, { 
+    const { buffer: audioBuffer, mimeType: fileMimeType, fileName, clientId } = await parseFormData();
+    logDebug(`Form data processed successfully ${requestId}`, { 
       audioSize: audioBuffer.length, 
       mimeType: fileMimeType,
-      fileName
+      fileName,
+      clientId: clientId || 'non specificato'
     });
 
     // Prepara il form data per OpenAI
     const form = new FormData();
     
-    // Determina il content type e l'estensione del file in base al tipo MIME o al nome del file
-    let contentType = 'audio/webm';
+    // Determina il content type e l'estensione del file
+    let contentTypeForOpenAI = 'audio/webm';
     let extension = 'webm';
     
     if (fileMimeType.includes('mp3') || fileMimeType.includes('mpeg') || fileName.toLowerCase().endsWith('.mp3')) {
-      contentType = 'audio/mpeg';
+      contentTypeForOpenAI = 'audio/mpeg';
       extension = 'mp3';
       logDebug(`Formato MP3 rilevato ${requestId}`);
     } else if (fileMimeType.includes('wav') || fileName.toLowerCase().endsWith('.wav')) {
-      contentType = 'audio/wav';
+      contentTypeForOpenAI = 'audio/wav';
       extension = 'wav';
       logDebug(`Formato WAV rilevato ${requestId}`);
     } else if (fileMimeType.includes('m4a') || fileMimeType.includes('mp4') || fileName.toLowerCase().endsWith('.m4a')) {
-      contentType = 'audio/mp4';
+      contentTypeForOpenAI = 'audio/mp4';
       extension = 'm4a';
       logDebug(`Formato M4A rilevato ${requestId}`);
     } else {
       logDebug(`Formato generico, uso WebM come default ${requestId}`);
     }
     
-    logDebug(`Tipo di contenuto determinato ${requestId}`, { contentType, extension });
+    logDebug(`Tipo di contenuto determinato ${requestId}`, { contentTypeForOpenAI, extension });
     
     // Aggiungo un checksum rapido per verificare l'integrità del file
     const fileHash = crypto
@@ -251,11 +290,12 @@ export const handler: Handler = async (event) => {
       .digest('hex')
       .substring(0, 8);
     
-    logDebug(`File checksum (MD5) ${requestId}`, fileHash);
+    logDebug(`File checksum (MD5) ${requestId}: ${fileHash}`);
     
+    // Crea il form data per l'API di OpenAI
     form.append('file', audioBuffer, {
       filename: `audio_${fileHash}.${extension}`,
-      contentType: contentType
+      contentType: contentTypeForOpenAI
     });
     form.append('model', 'whisper-1');
     form.append('language', 'it');
@@ -270,15 +310,16 @@ export const handler: Handler = async (event) => {
       temperature: '0',
       fileSize: audioBuffer.length,
       fileName: `audio_${fileHash}.${extension}`,
-      contentType
+      contentType: contentTypeForOpenAI
     });
 
+    // Chiamata all'API di OpenAI
     logDebug(`Invio richiesta a OpenAI API ${requestId}`);
     try {
       const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`, // Rimuoviamo eventuali spazi
+          'Authorization': `Bearer ${apiKey.trim()}`,
           ...form.getHeaders()
         },
         // @ts-ignore - form-data è compatibile con node-fetch
@@ -292,18 +333,17 @@ export const handler: Handler = async (event) => {
       });
       
       if (!response.ok) {
-        const error = await response.text();
-        logDebug(`Errore API OpenAI ${requestId}`, error);
+        const errorText = await response.text();
+        logDebug(`Errore API OpenAI ${requestId}`, errorText);
         
         // Tenta di parsare l'errore JSON da OpenAI
-        let errorDetails = error;
+        let errorDetails = errorText;
         try {
-          const errorJson = JSON.parse(error);
-          errorDetails = errorJson.error?.message || error;
+          const errorJson = JSON.parse(errorText);
+          errorDetails = errorJson.error?.message || errorText;
           logDebug(`Dettagli errore parsati ${requestId}`, errorJson);
         } catch (e) {
           logDebug(`Impossibile parsare l'errore come JSON ${requestId}`);
-          // Ignora se non è JSON
         }
         
         return {
@@ -317,6 +357,7 @@ export const handler: Handler = async (event) => {
         };
       }
 
+      // Leggi la risposta e restituisci la trascrizione
       const result = await response.text();
       logDebug(`Trascrizione completata con successo ${requestId}`, {
         length: result.length,
@@ -330,9 +371,19 @@ export const handler: Handler = async (event) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ result, requestId }),
+        body: JSON.stringify({ 
+          result, 
+          requestId,
+          clientId: clientId || null,
+          fileInfo: {
+            type: contentTypeForOpenAI,
+            extension,
+            size: audioBuffer.length,
+            hash: fileHash
+          }
+        }),
       };
-    } catch (fetchError) {
+    } catch (fetchError: any) {
       logDebug(`Errore durante la chiamata API OpenAI ${requestId}`, fetchError);
       return {
         statusCode: 500,

@@ -249,15 +249,13 @@ export function Patients() {
                       <div className="text-sm text-gray-900">{patient.phone || '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/app/new-consultation?patient=${patient.id}`);
-                        }}
-                        className="text-blue-600 hover:text-blue-700"
+                      <a
+                        href={`https://zenscribe.it/app/new-consultation?patientId=${patient.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-blue-600 hover:text-blue-700 no-underline"
                       >
                         Nuova Consultazione
-                      </button>
+                      </a>
                     </td>
                   </tr>
                 ))}

@@ -88,6 +88,12 @@ export async function saveConsultation(
       note_specialista: report.noteSpecialista !== 'N.A.' ? report.noteSpecialista : null
     };
 
+    console.log('[saveConsultation] Saving consultation with data:', {
+      ...consultationData,
+      medical_report: '(omitted)',
+      transcription: '(omitted)'
+    });
+
     const { data, error } = await supabase
       .from('consultations')
       .insert([consultationData])
@@ -99,7 +105,11 @@ export async function saveConsultation(
       throw new Error(`Failed to save consultation: ${error.message}`);
     }
 
-    console.log('[saveConsultation] Consultation saved successfully:', data);
+    console.log('[saveConsultation] Consultation saved successfully:', {
+      ...data,
+      medical_report: '(omitted)',
+      transcription: '(omitted)'
+    });
     return data;
   } catch (error) {
     console.error('[saveConsultation] Error:', error);

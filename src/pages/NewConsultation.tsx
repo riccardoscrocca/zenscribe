@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Mic, Upload, AlertCircle, Loader2, UserPlus, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { drawWaveform } from '../lib/audioVisualizer';
-import { transcribeAudio, uploadAndTranscribeFile } from '../lib/transcription';
+import { transcribeAudio, uploadAndTranscribeFile, uploadAndTranscribeFileDedicated } from '../lib/transcription';
 import { analyzeConsultation, saveConsultation } from '../lib/aiAgent';
 import { supabase } from '../lib/supabase';
 import type { MedicalReport } from '../lib/aiInstructions';
@@ -274,6 +274,7 @@ export function NewConsultation() {
 
       console.log('Updating minutes used with recording time:', recordingTime);
       const updated = await updateMinutesUsed(user.id, recordingTime);
+      console.log('Minutes update result:', { updated, recordingTime });
       
       if (!updated) {
         throw new Error('Failed to update minutes used');
@@ -410,15 +411,60 @@ export function NewConsultation() {
         }, 10000); // 10 secondi di timeout
       });
 
-      // Trascrivi il file audio usando la funzione specifica per l'upload
-      console.log('Inizio trascrizione via API...');
-      const text = await uploadAndTranscribeFile(file);
-      console.log('Trascrizione completata, lunghezza:', text.length);
-      setTranscription(text);
-
-      // Processa la consultazione
-      console.log('Inizio analisi della consultazione...');
-      await processConsultation(text);
+      // Determina se è un file MP3
+      const isMP3 = file.type.includes('mp3') || file.type.includes('mpeg') || file.name.toLowerCase().endsWith('.mp3');
+      
+      // Debug aggiuntivo
+      console.log('Dettagli file per decisione funzione:', { 
+        nome: file.name, 
+        tipo: file.type, 
+        estensione: file.name.split('.').pop()?.toLowerCase(), 
+        isMP3,
+        endsWith_mp3: file.name.toLowerCase().endsWith('.mp3'),
+        includes_mp3: file.type.includes('mp3'),
+        includes_mpeg: file.type.includes('mpeg')
+      });
+      
+      // Usa la funzione dedicata per i file MP3, altrimenti usa la funzione standard
+      console.log(`Inizio trascrizione via API ${isMP3 ? '(utilizzando funzione dedicata per MP3)' : '(usando funzione standard)'}...`);
+      
+      let text;
+      try {
+        if (isMP3) {
+          // Utilizzo la funzione dedicata ottimizzata per MP3
+          console.log('CHIAMATA A uploadAndTranscribeFileDedicated');
+          text = await uploadAndTranscribeFileDedicated(file);
+        } else {
+          // Per altri tipi di file, utilizzo la funzione standard
+          console.log('CHIAMATA A uploadAndTranscribeFile');
+          text = await uploadAndTranscribeFile(file);
+        }
+        
+        console.log('Trascrizione completata, lunghezza:', text.length);
+        setTranscription(text);
+  
+        // Processa la consultazione
+        console.log('Inizio analisi della consultazione...');
+        await processConsultation(text);
+      } catch (transcriptionError) {
+        console.error('Errore durante la trascrizione:', transcriptionError);
+        
+        // Se fallisce la funzione dedicata per MP3, prova con la funzione standard come fallback
+        if (isMP3) {
+          console.log('FALLBACK: Tentativo con funzione standard dopo fallimento funzione dedicata');
+          try {
+            text = await uploadAndTranscribeFile(file);
+            console.log('Trascrizione con fallback completata, lunghezza:', text.length);
+            setTranscription(text);
+            await processConsultation(text);
+          } catch (fallbackError) {
+            console.error('Errore anche nel fallback:', fallbackError);
+            throw fallbackError;
+          }
+        } else {
+          throw transcriptionError;
+        }
+      }
     } catch (error) {
       const err = error as Error;
       console.error('File upload error:', err);

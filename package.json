@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "clean-macos-files": "find . -name '._*' -type f -delete",
+    "predeploy": "npm run clean-macos-files",
+    "deploy": "npm run build && netlify deploy --prod --skip-functions-cache"
   },
   "dependencies": {
     "@netlify/functions": "^3.1.2",

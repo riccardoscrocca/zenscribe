@@ -2,6 +2,7 @@
   publish = "dist"
   command = "npm run build"
   functions = "netlify/functions"
+  environment = { NODE_VERSION = "18" }
 
 [functions]
   node_bundler = "esbuild"
