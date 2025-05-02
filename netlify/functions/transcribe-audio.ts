@@ -13,14 +13,14 @@ export const handler: Handler = async (event) => {
       };
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
     console.log('API Key format check:', {
       present: !!apiKey,
       length: apiKey?.length,
       startsWithSk: apiKey?.startsWith('sk-'),
       // Non logghiamo mai la chiave completa per sicurezza
       firstChars: apiKey?.substring(0, 5),
-      lastChars: apiKey?.substring(apiKey.length - 4)
+      lastChars: apiKey?.substring(apiKey?.length - 4)
     });
 
     if (!apiKey || !apiKey.startsWith('sk-')) {
@@ -105,15 +105,36 @@ export const handler: Handler = async (event) => {
 
     // Prepara il form data per OpenAI
     const form = new FormData();
+    
+    // Determina il content type e l'estensione del file in base al tipo MIME
+    let contentType = 'audio/webm';
+    let extension = 'webm';
+    
+    // Ottieni il tipo MIME dal form data
+    const mimeType = event.headers['content-type']?.toLowerCase() || '';
+    
+    if (mimeType.includes('mp3') || mimeType.includes('mpeg')) {
+      contentType = 'audio/mpeg';
+      extension = 'mp3';
+    } else if (mimeType.includes('wav')) {
+      contentType = 'audio/wav';
+      extension = 'wav';
+    } else if (mimeType.includes('m4a')) {
+      contentType = 'audio/mp4';
+      extension = 'm4a';
+    }
+    
+    console.log('Using content type:', contentType, 'with extension:', extension);
+    
     form.append('file', audioBuffer, {
-      filename: 'audio.webm',
-      contentType: 'audio/webm'
+      filename: `audio.${extension}`,
+      contentType: contentType
     });
     form.append('model', 'whisper-1');
     form.append('language', 'it');
     form.append('response_format', 'text');
 
-    console.log('Sending request to OpenAI...');
+    console.log('Sending request to OpenAI with audio format:', contentType);
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
@@ -160,4 +181,4 @@ export const handler: Handler = async (event) => {
       }),
     };
   }
-};
+}; 
