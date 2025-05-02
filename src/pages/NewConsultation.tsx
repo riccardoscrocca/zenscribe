@@ -261,7 +261,7 @@ export function NewConsultation() {
       const currentRecordingTime = recordingTime;
       console.log('Saving consultation with recording time:', currentRecordingTime);
 
-      // Salva la consultazione
+      // Salva la consultazione - il trigger SQL si occuperà di aggiornare i minuti
       await saveConsultation(
         {
           patientId: selectedPatient,
@@ -430,17 +430,6 @@ export function NewConsultation() {
         console.log('Trascrizione completata, lunghezza:', text.length);
         setTranscription(text);
 
-        // Aggiorna i minuti prima di processare la consultazione
-        if (!user?.id) throw new Error('User not authenticated');
-        
-        console.log('Aggiornamento minuti con durata:', duration);
-        const updated = await updateMinutesUsed(user.id, duration);
-        console.log('Risultato aggiornamento minuti:', { updated, duration });
-        
-        if (!updated) {
-          throw new Error('Failed to update minutes used');
-        }
-
         // Processa la consultazione con la durata del file
         console.log('Inizio processConsultation con durata:', duration);
         await processConsultation(text);
@@ -454,18 +443,6 @@ export function NewConsultation() {
             text = await uploadAndTranscribeFile(file);
             console.log('Trascrizione con fallback completata, lunghezza:', text.length);
             setTranscription(text);
-
-            // Aggiorna i minuti anche nel caso di fallback
-            if (!user?.id) throw new Error('User not authenticated');
-            
-            console.log('Aggiornamento minuti (fallback) con durata:', duration);
-            const updated = await updateMinutesUsed(user.id, duration);
-            console.log('Risultato aggiornamento minuti (fallback):', { updated, duration });
-            
-            if (!updated) {
-              throw new Error('Failed to update minutes used');
-            }
-
             await processConsultation(text);
           } catch (fallbackError) {
             console.error('Errore anche nel fallback:', fallbackError);
