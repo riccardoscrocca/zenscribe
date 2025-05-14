@@ -401,7 +401,7 @@ export async function uploadAndTranscribeFileDedicated(file: File): Promise<stri
         console.error(`[${sessionId}] Errore nella lettura come testo, provo JSON:`, textError);
       }
       
-      // Se il testo fallisce, prova JSON
+      // Se JSON fallisce, prova JSON
       try {
         const jsonResponse = await response.json();
         const transcription = jsonResponse.result || jsonResponse.text;
@@ -447,14 +447,30 @@ export async function uploadAndTranscribeFileDedicated(file: File): Promise<stri
 
 // Funzione comune per chiamare l'API di trascrizione
 async function callTranscriptionApi(formData: FormData): Promise<string> {
-  const sessionId = Math.random().toString(36).substring(2, 10);
+  const sessionId = formData.get('session_id') as string || Math.random().toString(36).substring(2, 10);
   try {
-    console.log(`[${sessionId}] [callTranscriptionApi] Chiamata alla funzione Netlify...`);
+    console.log(`[${sessionId}] [callTranscriptionApi] Chiamata alla funzione di trascrizione...`);
     
-    const response = await fetch('/.netlify/functions/transcribe-audio', {
+    // Verifica se utilizzare Edge Function Supabase o Netlify Function
+    const useSupabaseFunction = true; // Imposta a true per usare la Edge Function
+    const endpoint = useSupabaseFunction 
+      ? 'https://zenscribeai.supabase.co/functions/v1/transcribe'
+      : '/.netlify/functions/transcribe-audio';
+    
+    console.log(`[${sessionId}] [callTranscriptionApi] Usando endpoint: ${endpoint}`);
+
+    // Timeout esteso per file audio lunghi
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minuti di timeout
+    
+    // Invia richiesta all'endpoint scelto
+    const response = await fetch(endpoint, {
       method: 'POST',
-      body: formData
+      body: formData,
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
 
     console.log(`[${sessionId}] [callTranscriptionApi] Risposta ricevuta:`, {
       status: response.status,
@@ -482,45 +498,50 @@ async function callTranscriptionApi(formData: FormData): Promise<string> {
       throw new Error(`Errore trascrizione (${response.status}): ${errorMessage || response.statusText}`);
     }
 
-    // Clona immediatamente la risposta
-    const responseClone = response.clone();
+    // Determina il tipo di contenuto della risposta
+    const contentType = response.headers.get('Content-Type') || '';
+    console.log(`[${sessionId}] [callTranscriptionApi] Tipo di contenuto risposta:`, contentType);
     
-    console.log(`[${sessionId}] [callTranscriptionApi] Parsing della risposta...`);
+    // Per risposte di testo, le gestiamo direttamente
+    if (contentType.includes('text/plain')) {
+      const textResponse = await response.text();
+      console.log(`[${sessionId}] [callTranscriptionApi] Trascrizione completata (testo diretto):`, {
+        lunghezza: textResponse.length,
+        anteprima: textResponse.substring(0, 100) + '...'
+      });
+      return textResponse;
+    }
     
-    // Prima prova a leggere come JSON
-    try {
+    // Per risposte JSON, estraiamo il campo result
+    if (contentType.includes('application/json')) {
       const responseData = await response.json();
-      
-      console.log(`[${sessionId}] [callTranscriptionApi] Dati risposta:`, {
+      console.log(`[${sessionId}] [callTranscriptionApi] Risposta JSON:`, {
         tipoRisposta: typeof responseData,
         chiavi: responseData ? Object.keys(responseData).join(', ') : 'nessuna'
       });
       
       const transcription = responseData.result;
-
       if (transcription) {
-        console.log(`[${sessionId}] [callTranscriptionApi] Trascrizione completata da JSON:`, {
+        console.log(`[${sessionId}] [callTranscriptionApi] Trascrizione completata (da JSON):`, {
           lunghezza: transcription.length,
           anteprima: transcription.substring(0, 100) + '...'
         });
         return transcription;
       }
-    } catch (jsonError) {
-      console.log(`[${sessionId}] [callTranscriptionApi] Risposta non è in formato JSON, provo come testo...`, jsonError);
     }
     
-    // Se JSON fallisce, prova a leggere come testo dalla copia clonata
+    // Fallback: leggi come testo se il JSON non contiene il risultato atteso
     try {
-      const textResponse = await responseClone.text();
-      if (textResponse) {
-        console.log(`[${sessionId}] [callTranscriptionApi] Trascrizione letta come testo:`, {
-          lunghezza: textResponse.length,
-          anteprima: textResponse.substring(0, 100) + '...'
+      const fallbackResponse = await response.clone().text();
+      if (fallbackResponse) {
+        console.log(`[${sessionId}] [callTranscriptionApi] Trascrizione letta come fallback:`, {
+          lunghezza: fallbackResponse.length,
+          anteprima: fallbackResponse.substring(0, 100) + '...'
         });
-        return textResponse;
+        return fallbackResponse;
       }
     } catch (textError) {
-      console.error(`[${sessionId}] [callTranscriptionApi] Errore anche nella lettura come testo:`, textError);
+      console.error(`[${sessionId}] [callTranscriptionApi] Errore nella lettura come testo di fallback:`, textError);
     }
     
     throw new Error('Nessuna trascrizione valida ricevuta dal server');
