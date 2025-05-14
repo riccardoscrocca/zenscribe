@@ -452,10 +452,10 @@ async function callTranscriptionApi(formData: FormData): Promise<string> {
     console.log(`[${sessionId}] [callTranscriptionApi] Chiamata alla funzione di trascrizione...`);
     
     // Verifica se utilizzare Edge Function Supabase o Netlify Function
-    const useSupabaseFunction = true; // Imposta a true per usare la Edge Function
+    const useSupabaseFunction = false; // Imposta a false per usare la funzione Netlify
     const endpoint = useSupabaseFunction 
       ? 'https://zenscribeai.supabase.co/functions/v1/transcribe'
-      : '/.netlify/functions/transcribe_audio';
+      : '/.netlify/functions/transcribe';
     
     console.log(`[${sessionId}] [callTranscriptionApi] Usando endpoint: ${endpoint}`);
 
