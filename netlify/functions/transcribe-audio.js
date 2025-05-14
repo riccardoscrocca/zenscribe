@@ -3,7 +3,6 @@ const FormData = require('form-data');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
-const { Handler } = require('@netlify/functions');
 
 // Funzione di logging migliorata
 function logDebug(message, data) {
@@ -23,7 +22,7 @@ function errorResponse(message, statusCode = 500, requestId) {
 }
 
 // Handler principale
-const handler = async (event) => {
+exports.handler = async (event) => {
   // Genera un ID univoco per questa richiesta
   const requestId = uuidv4().substring(0, 8);
   
@@ -269,6 +268,4 @@ const handler = async (event) => {
       })
     };
   }
-};
-
-module.exports = { handler }; 
+}; 
