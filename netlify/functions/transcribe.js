@@ -64,13 +64,16 @@ exports.handler = async (event) => {
       filename: audioFile.filename || 'audio.webm',
       contentType: audioFile.contentType || 'audio/webm'
     });
-    form.append('model', 'whisper-1');
-    form.append('language', 'it');
-    form.append('response_format', 'text');
-    form.append('temperature', '0');
+    
+    // Parametri ottimizzati per trascrizione litterale
+    form.append('model', 'whisper-1');        // Modello base Whisper
+    form.append('language', 'it');            // Lingua italiana
+    form.append('response_format', 'verbose_json'); // Formato completo per maggiori dettagli
+    form.append('temperature', '0');          // Minima temperatura per risultati deterministici
+    form.append('prompt', 'Trascrivi letteralmente tutto, incluse ripetizioni e false partenze. Non modificare, riassumere o correggere il testo.'); // Prompt che guida la trascrizione verso un risultato letterale
     
     // Chiama OpenAI API
-    log(`[${requestId}] Invio richiesta a OpenAI`);
+    log(`[${requestId}] Invio richiesta a OpenAI con parametri ottimizzati per trascrizione letterale`);
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
@@ -100,9 +103,21 @@ exports.handler = async (event) => {
     const contentType = response.headers.get('content-type');
     let transcriptionText;
     
+    // Processo JSON verboso per estrarre il testo
     if (contentType && contentType.includes('application/json')) {
       const jsonResponse = await response.json();
-      transcriptionText = jsonResponse.text;
+      
+      // Log dettagliato della risposta
+      log(`[${requestId}] Risposta JSON ricevuta`, {
+        hasText: !!jsonResponse.text,
+        hasTranscript: !!jsonResponse.transcript,
+        segments: jsonResponse.segments ? jsonResponse.segments.length : 0
+      });
+      
+      // Estrai testo dalla risposta JSON
+      transcriptionText = jsonResponse.text || 
+                         (jsonResponse.transcript) || 
+                         (jsonResponse.segments ? jsonResponse.segments.map(s => s.text).join(' ') : '');
     } else {
       transcriptionText = await response.text();
     }

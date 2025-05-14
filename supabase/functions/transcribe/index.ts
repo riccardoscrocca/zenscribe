@@ -32,9 +32,9 @@ Deno.serve(async (req) => {
     const formData = await req.formData();
     const audioFile = formData.get('file');
     const language = formData.get('language') || 'it';
-    const responseFormat = formData.get('response_format') || 'text';
+    const responseFormat = 'verbose_json'; // Formato ottimizzato
     
-    // Temperatura ridotta per maggiore precisione
+    // Temperatura minima per maggiore precisione
     const temperature = 0;
 
     if (!audioFile) {
@@ -61,44 +61,52 @@ Deno.serve(async (req) => {
     
     log(`[${sessionId}] Chiamata a OpenAI API...`);
 
-    // Call OpenAI API with enhanced parameters
+    // Call OpenAI API with enhanced parameters for verbatim transcription
     const startTime = Date.now();
-    const transcription = await openai.audio.transcriptions.create({
+    const transcriptionOptions = {
       file: audioFile,
       model: 'whisper-1',
       language: language as string,
       response_format: responseFormat as string,
-      temperature: temperature
-    });
+      temperature: temperature,
+      prompt: 'Trascrivi letteralmente tutto, incluse ripetizioni e false partenze. Non modificare, riassumere o correggere il testo.'
+    };
+    
+    log(`[${sessionId}] Parametri trascrizione:`, transcriptionOptions);
+    
+    const transcriptionResponse = await openai.audio.transcriptions.create(transcriptionOptions);
     const duration = Date.now() - startTime;
     
     log(`[${sessionId}] Trascrizione completata in ${duration}ms`);
 
-    // Return the transcription directly as text
-    let responseBody;
-    let contentType;
+    // Estrai il testo dalla risposta
+    let transcriptionText = '';
+    let contentType = 'text/plain';
     
-    if (responseFormat === 'json') {
-      // Fornisci una risposta JSON per compatibilità
-      responseBody = JSON.stringify({ 
-        result: transcription,
-        requestId: sessionId,
-        duration: duration
+    if (typeof transcriptionResponse === 'object') {
+      // Formato JSON verboso
+      log(`[${sessionId}] Elaborando risposta JSON verbosa`, {
+        hasText: 'text' in transcriptionResponse,
+        hasSegments: 'segments' in transcriptionResponse && Array.isArray(transcriptionResponse.segments),
       });
-      contentType = 'application/json';
+      
+      if ('text' in transcriptionResponse) {
+        transcriptionText = transcriptionResponse.text as string;
+      } else if ('segments' in transcriptionResponse && Array.isArray(transcriptionResponse.segments)) {
+        transcriptionText = transcriptionResponse.segments.map((s: any) => s.text).join(' ');
+      } else {
+        transcriptionText = JSON.stringify(transcriptionResponse);
+        contentType = 'application/json';
+      }
     } else {
-      // Restituisci il testo direttamente
-      responseBody = transcription;
-      contentType = 'text/plain';
+      // Risposta di testo semplice
+      transcriptionText = transcriptionResponse as string;
     }
     
-    log(`[${sessionId}] Risposta inviata`, { 
-      format: responseFormat,
-      contentType,
-      textLength: typeof transcription === 'string' ? transcription.length : 'not a string'
-    });
-    
-    return new Response(responseBody, {
+    log(`[${sessionId}] Testo trascritto (primi 100 char):`, transcriptionText.substring(0, 100));
+
+    // Return the transcription
+    return new Response(transcriptionText, {
       headers: {
         ...corsHeaders,
         'Content-Type': contentType,
