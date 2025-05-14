@@ -9,8 +9,9 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "clean-macos-files": "find . -name '._*' -type f -delete",
-    "predeploy": "npm run clean-macos-files",
-    "deploy": "npm run build && netlify deploy --prod --skip-functions-cache"
+    "predeploy": "npm run clean-macos-files && npm run build",
+    "deploy": "netlify deploy --prod --skip-functions-cache --function-name transcribe",
+    "deploy-clean": "npm run predeploy && netlify deploy --prod --skip-functions-cache --function-name transcribe"
   },
   "dependencies": {
     "@netlify/functions": "^3.1.2",

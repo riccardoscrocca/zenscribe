@@ -43,6 +43,8 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     formData.append('response_format', 'text');
     formData.append('temperature', '0');
     formData.append('session_id', sessionId);
+    // Aggiungi prompt per trascrizione letterale
+    formData.append('prompt', 'Trascrivi letteralmente tutto, incluse ripetizioni e false partenze. Non modificare, riassumere o correggere il testo.');
 
     console.log(`[${sessionId}] [transcribeAudio] FormData creato, invio file...`, {
       filename: fileName,
@@ -138,6 +140,8 @@ export async function uploadAndTranscribeFile(file: File): Promise<string> {
     formData.append('response_format', 'text');
     formData.append('temperature', '0');
     formData.append('session_id', sessionId);
+    // Aggiungi prompt per trascrizione letterale
+    formData.append('prompt', 'Trascrivi letteralmente tutto, incluse ripetizioni e false partenze. Non modificare, riassumere o correggere il testo.');
     
     // Debug log
     for (const pair of formData.entries()) {
@@ -283,6 +287,9 @@ export async function uploadAndTranscribeFileDedicated(file: File): Promise<stri
       formData.append('language', 'it');
       formData.append('response_format', 'text');
       formData.append('session_id', sessionId);
+      // Aggiungi prompt per trascrizione letterale
+      formData.append('prompt', 'Trascrivi letteralmente tutto, incluse ripetizioni e false partenze. Non modificare, riassumere o correggere il testo.');
+      formData.append('temperature', '0');
       
       const startTime = Date.now();
       
@@ -330,6 +337,9 @@ export async function uploadAndTranscribeFileDedicated(file: File): Promise<stri
     formData.append('language', 'it');
     formData.append('response_format', 'text');
     formData.append('session_id', sessionId);
+    // Aggiungi prompt per trascrizione letterale
+    formData.append('prompt', 'Trascrivi letteralmente tutto, incluse ripetizioni e false partenze. Non modificare, riassumere o correggere il testo.');
+    formData.append('temperature', '0');
     
     // Per file grandi, usa la funzione transcribe-audio
     // Per file piccoli, usa la funzione upload-transcribe
