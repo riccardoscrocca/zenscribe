@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Users, PlusCircle, History, ChevronLeft, ChevronRight, FileText, Pill, DollarSign, BarChart2, MessageSquare, Settings, CreditCard, X, Bot as Lotus } from 'lucide-react';
+import { LayoutDashboard, Users, PlusCircle, History, ChevronLeft, ChevronRight, FileText, Pill, DollarSign, BarChart2, MessageSquare, Settings, CreditCard, X, Bot as Lotus, Activity } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface SidebarProps {
@@ -59,7 +59,8 @@ export function Sidebar({ onClose }: SidebarProps) {
         { icon: DollarSign, label: 'Fatturazione', to: '/app/billing' },
         { icon: BarChart2, label: 'Report', to: '/app/reports' },
         { icon: MessageSquare, label: 'Comunicazioni', to: '/app/communication' },
-        { icon: Settings, label: 'Strumenti Admin', to: '/app/admin' }
+        { icon: Settings, label: 'Strumenti Admin', to: '/app/admin' },
+        { icon: Activity, label: 'Diagnostica Sottoscrizioni', to: '/app/subscription-diagnostics' }
       ]
     }] : [])
   ];

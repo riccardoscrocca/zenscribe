@@ -103,7 +103,7 @@ export const handler: Handler = async (event) => {
         const busboy = Busboy({ 
           headers: { 'content-type': event.headers['content-type'] || '' },
           limits: {
-            fileSize: 100 * 1024 * 1024, // 100MB
+            fileSize: 200 * 1024 * 1024, // 200MB (aumentato da 100MB)
             files: 1
           }
         });
@@ -220,7 +220,7 @@ export const handler: Handler = async (event) => {
     });
 
     // Prepara il form data per OpenAI
-    const form = new FormData();
+    const formData = new FormData();
     
     // Determina il content type e l'estensione del file in base al tipo MIME o al nome del file
     let contentType = 'audio/webm';
@@ -253,14 +253,14 @@ export const handler: Handler = async (event) => {
     
     logDebug(`File checksum (MD5) ${requestId}`, fileHash);
     
-    form.append('file', audioBuffer, {
+    formData.append('file', audioBuffer, {
       filename: `audio_${fileHash}.${extension}`,
       contentType: contentType
     });
-    form.append('model', 'whisper-1');
-    form.append('language', 'it');
-    form.append('response_format', 'text');
-    form.append('temperature', '0');
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'it');
+    formData.append('response_format', 'text');
+    formData.append('temperature', '0');
 
     // Log dettagliati per il debugging
     logDebug(`FormData preparato per OpenAI ${requestId}`, {
@@ -273,26 +273,41 @@ export const handler: Handler = async (event) => {
       contentType
     });
 
+    // Aumenta il timeout per la chiamata a OpenAI
+    const timeoutPromise = new Promise<Response | null>((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout durante la richiesta a OpenAI')), 300000); // 5 minuti
+    });
+
     logDebug(`Invio richiesta a OpenAI API ${requestId}`);
+
     try {
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`, // Rimuoviamo eventuali spazi
-          ...form.getHeaders()
-        },
-        // @ts-ignore - form-data è compatibile con node-fetch
-        body: form
-      });
+      // Chiamata a OpenAI con race per il timeout
+      const openaiResponse = await Promise.race([
+        fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey.trim()}`, // Rimuoviamo eventuali spazi
+            ...formData.getHeaders()
+          },
+          // @ts-ignore - form-data è compatibile con node-fetch
+          body: formData
+        }),
+        timeoutPromise
+      ]);
+
+      // Se la risposta è null, il timeout ha vinto la race
+      if (!openaiResponse) {
+        throw new Error('Timeout durante la richiesta a OpenAI');
+      }
 
       logDebug(`Risposta OpenAI ricevuta ${requestId}`, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries())
+        status: openaiResponse.status,
+        statusText: openaiResponse.statusText,
+        headers: Object.fromEntries(openaiResponse.headers.entries())
       });
       
-      if (!response.ok) {
-        const error = await response.text();
+      if (!openaiResponse.ok) {
+        const error = await openaiResponse.text();
         logDebug(`Errore API OpenAI ${requestId}`, error);
         
         // Tenta di parsare l'errore JSON da OpenAI
@@ -307,17 +322,17 @@ export const handler: Handler = async (event) => {
         }
         
         return {
-          statusCode: response.status,
+          statusCode: openaiResponse.status,
           body: JSON.stringify({ 
             error: 'OpenAI API Error',
             details: errorDetails,
-            status: response.status,
+            status: openaiResponse.status,
             requestId
           }),
         };
       }
 
-      const result = await response.text();
+      const result = await openaiResponse.text();
       logDebug(`Trascrizione completata con successo ${requestId}`, {
         length: result.length,
         preview: result.substring(0, 100) + (result.length > 100 ? '...' : '')

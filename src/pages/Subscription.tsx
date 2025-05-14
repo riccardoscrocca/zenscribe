@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { getSubscriptionStatus } from '../lib/subscriptions';
 import { STRIPE_PRODUCTS } from '../lib/stripe-config';
+import { requestPlanChange } from '../lib/subscription-client';
 import {
   Clock, 
   FileText, 
@@ -16,7 +17,8 @@ import {
   Sparkles,
   Loader2,
   Mail,
-  Settings
+  Settings,
+  AlertCircle
 } from 'lucide-react';
 
 interface SubscriptionStatus {
@@ -121,6 +123,7 @@ export function Subscription() {
   const [loading, setLoading] = useState<boolean>(false);
   const [subscribing, setSubscribing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -154,7 +157,27 @@ export function Subscription() {
     try {
       setSubscribing(true);
       setError(null);
+      setSuccess(null);
 
+      // Utilizziamo prima la nuova API per il cambio piano via RPC
+      const tierName = planKey.toLowerCase() as 'free' | 'basic' | 'advanced';
+      const result = await requestPlanChange(user.id, tierName);
+      
+      if (result.success) {
+        // Se cambio piano via RPC è riuscito, mostriamo messaggio di successo
+        setSuccess(`Piano ${planKey} attivato con successo! Gli aggiornamenti saranno visibili al prossimo login.`);
+        setTimeout(() => {
+          // Ricarica lo stato dell'abbonamento
+          getSubscriptionStatus(user.id)
+            .then(updatedStatus => setStatus(updatedStatus))
+            .catch(console.error);
+        }, 1500);
+        return;
+      }
+      
+      // Se il cambio piano via RPC fallisce, proviamo con il metodo Stripe diretto
+      console.warn('Cambio piano via RPC fallito, utilizzo checkout Stripe:', result.error);
+            
       // Use payment links for both Basic and Advanced plans
       if (planKey === 'Basic' && STRIPE_PRODUCTS.BASIC.paymentLink) {
         window.location.href = STRIPE_PRODUCTS.BASIC.paymentLink;
@@ -196,8 +219,16 @@ export function Subscription() {
   return (
     <div className="max-w-5xl mx-auto py-12 px-4">
       {error && (
-        <div className="mb-6 p-4 bg-red-50 rounded-lg text-red-700">
-          {error}
+        <div className="mb-6 p-4 bg-red-50 rounded-lg text-red-700 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+      
+      {success && (
+        <div className="mb-6 p-4 bg-green-50 rounded-lg text-green-700 flex items-start gap-3">
+          <Check className="h-5 w-5 mt-0.5 flex-shrink-0" />
+          <span>{success}</span>
         </div>
       )}
 

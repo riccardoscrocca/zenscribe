@@ -10,6 +10,7 @@ import {
 import { Layout } from './components/Layout';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
+import { LoginSimple } from './pages/LoginSimple';
 import { ResetPassword } from './pages/ResetPassword';
 import { Dashboard } from './pages/Dashboard';
 import { Patients } from './pages/Patients';
@@ -25,6 +26,7 @@ import { Privacy } from './pages/Privacy';
 import { AdminTools } from './pages/AdminTools';
 import { AuthProvider } from './contexts/AuthContext';
 import { PrivacyBanner } from './components/PrivacyBanner';
+import { SubscriptionDiagnostics } from './pages/SubscriptionDiagnostics';
 
 function AppRoutes() {
   const location = useLocation();
@@ -45,6 +47,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/login-diagnostico" element={<LoginSimple />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/check-users" element={<UserCheck />} />
       <Route path="/privacy" element={<Privacy />} />
@@ -60,6 +63,7 @@ function AppRoutes() {
         <Route path="medications" element={<Medications />} />
         <Route path="orders" element={<Orders />} />
         <Route path="admin" element={<AdminTools />} />
+        <Route path="subscription-diagnostics" element={<SubscriptionDiagnostics />} />
       </Route>
     </Routes>
   );

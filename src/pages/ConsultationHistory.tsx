@@ -47,22 +47,7 @@ export function ConsultationHistory() {
       setLoading(true);
       setError(null);
 
-      // 1. Prendi pazienti del dottore loggato
-      const { data: patients, error: patientsError } = await supabase
-        .from('patients')
-        .select('id, first_name, last_name, user_id')
-        .eq('user_id', user?.id);
-
-      if (patientsError) throw patientsError;
-
-      const patientIds = (patients ?? []).map((p) => p.id);
-      if (patientIds.length === 0) {
-        setConsultations([]);
-        setLoading(false);
-        return;
-      }
-
-      // 2. Prendi tutte le consultazioni dei loro pazienti
+      // Ottieni tutte le consultazioni dell'utente corrente
       const { data, error } = await supabase
         .from('consultations')
         .select(
@@ -86,17 +71,38 @@ export function ConsultationHistory() {
           )
         `
         )
-        .in('patient_id', patientIds)
+        .eq('user_id', user?.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      // mappa dati sul formato desiderato
-      const transformedData =
-        data?.map((consultation) => ({
-          ...consultation,
-          patient: consultation.patient
-        })) || [];
+      // Assicurati che ogni consultazione abbia la struttura corretta
+      const transformedData = (data || []).map((consultation) => {
+        // Se patient è un array, prendi il primo elemento, altrimenti usa l'oggetto direttamente
+        const patientData = Array.isArray(consultation.patient) 
+          ? consultation.patient[0] 
+          : consultation.patient;
+        
+        return {
+          id: consultation.id,
+          created_at: consultation.created_at,
+          audio_url: consultation.audio_url,
+          motivo_visita: consultation.motivo_visita,
+          storia_medica: consultation.storia_medica,
+          storia_ponderale: consultation.storia_ponderale,
+          abitudini_alimentari: consultation.abitudini_alimentari,
+          attivita_fisica: consultation.attivita_fisica,
+          fattori_psi: consultation.fattori_psi,
+          esami_parametri: consultation.esami_parametri,
+          punti_critici: consultation.punti_critici,
+          note_specialista: consultation.note_specialista,
+          patient: {
+            first_name: patientData?.first_name || 'Sconosciuto',
+            last_name: patientData?.last_name || 'Sconosciuto',
+            user_id: patientData?.user_id || ''
+          }
+        };
+      });
 
       setConsultations(transformedData);
     } catch (err) {

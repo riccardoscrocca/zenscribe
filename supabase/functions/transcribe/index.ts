@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
   try {
     // Get the audio data from request
     const formData = await req.formData();
-    const audioFile = formData.get('file') as File;
+    const audioFile = formData.get('file');
 
     if (!audioFile) {
       throw new Error('No audio file provided');

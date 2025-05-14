@@ -55,6 +55,17 @@ export function NewConsultation() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
+  const [fileDetails, setFileDetails] = useState<{
+    name: string;
+    type: string;
+    size: string;
+    duration: number;
+    lastModified: string;
+  } | null>(null);
+  const [transcriptionStartTime, setTranscriptionStartTime] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+
   useEffect(() => {
     if (user?.id) {
       loadPatients();
@@ -123,6 +134,23 @@ export function NewConsultation() {
     };
   }, [isRecording]);
 
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (isTranscribing && transcriptionStartTime) {
+      interval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - transcriptionStartTime) / 1000);
+        setElapsedTime(elapsed);
+      }, 1000);
+    } else {
+      setElapsedTime(0);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isTranscribing, transcriptionStartTime]);
+
   const loadPatients = async () => {
     try {
       if (!user?.id) {
@@ -146,6 +174,12 @@ export function NewConsultation() {
   };
 
   const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatElapsedTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
@@ -258,11 +292,28 @@ export function NewConsultation() {
       setProcessingStep(3);
 
       setIsSaving(true);
-      const currentRecordingTime = recordingTime;
-      console.log('Saving consultation with recording time:', currentRecordingTime);
+      
+      // Assicurati che la durata sia un numero positivo
+      let currentRecordingTime = recordingTime;
+      if (!currentRecordingTime || currentRecordingTime <= 0) {
+        // Nuova formula di stima più accurata:
+        // - Assume una velocità media di parlato di 150 parole al minuto
+        // - Stima 5 caratteri per parola in media
+        // - Aggiunge un margine del 20% per sicurezza
+        const wordsCount = transcription.split(/\s+/).length;
+        const estimatedMinutes = (wordsCount / 150) * 1.2; // 150 parole/min + 20% margine
+        currentRecordingTime = Math.max(30, Math.ceil(estimatedMinutes * 60)); // Minimo 30 secondi
+        console.warn('Durata non rilevata, stima basata sul conteggio parole:', {
+          parole: wordsCount,
+          minuti_stimati: estimatedMinutes,
+          secondi_stimati: currentRecordingTime
+        });
+      }
+      
+      console.log('Saving consultation with recording time:', currentRecordingTime, 'seconds');
 
-      // Salva la consultazione - il trigger SQL si occuperà di aggiornare i minuti
-      await saveConsultation(
+      // Salva la consultazione con il campo duration_seconds
+      const result = await saveConsultation(
         {
           patientId: selectedPatient,
           transcription,
@@ -274,6 +325,8 @@ export function NewConsultation() {
         visitType,
         currentRecordingTime
       );
+      
+      console.log('Consultation saved with ID:', result?.id, 'and duration:', result?.duration_seconds);
       
       setProcessingStep(4);
       setIsSaving(false);
@@ -338,45 +391,38 @@ export function NewConsultation() {
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    if (!event.target.files || event.target.files.length === 0) return;
 
-    console.log('File selezionato:', { 
-      name: file.name, 
-      type: file.type, 
-      size: file.size 
-    });
-
-    if (!selectedPatient) {
-      setError('Seleziona un paziente prima di caricare un file');
-      return;
-    }
-
-    // Check file type
-    if (!file.type.startsWith('audio/')) {
-      setError('Il file deve essere un file audio');
-      return;
-    }
-
-    // Check file size (max 100MB)
-    if (file.size > 100 * 1024 * 1024) {
-      setError('Il file non può superare i 100MB');
-      return;
-    }
+    const file = event.target.files[0];
+    setProcessingStep(1);
+    setIsTranscribing(true);
+    setTranscription('');
+    setError('');
+    setTranscriptionStartTime(Date.now());
 
     try {
-      if (!user?.id) throw new Error('User not authenticated');
+      const fileInfo = {
+        name: file.name,
+        type: file.type || 'sconosciuto',
+        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+        lastModified: new Date(file.lastModified).toLocaleString()
+      };
       
-      const hasMinutes = await checkMinutesAvailable(user.id, 60);
-      if (!hasMinutes) {
-        setError('Minuti disponibili esauriti. Per continuare a registrare consultazioni, è necessario aggiornare il piano di abbonamento.');
-        return;
+      console.log('File ricevuto:', fileInfo);
+      setFileDetails({...fileInfo, duration: 0});
+
+      if (!selectedPatient) {
+        throw new Error('Seleziona un paziente prima di caricare un file audio');
       }
 
-      // Imposta lo stato di trascrizione
-      setIsTranscribing(true);
-      setProcessingStep(1);
-      setError(null);
+      const isValidAudioFile = file.type.startsWith('audio/') || 
+                              ['.mp3', '.wav', '.ogg', '.m4a'].some(ext => 
+                                file.name.toLowerCase().endsWith(ext));
+
+      if (!isValidAudioFile) {
+        throw new Error('Il file selezionato non è un file audio valido');
+      }
+
       setTranscription('');
       
       console.log('Inizio trascrizione del file audio');
@@ -389,41 +435,102 @@ export function NewConsultation() {
       
       let duration = 0;
       try {
-        await new Promise((resolve, reject) => {
+        const durationPromise = new Promise<number>((resolve, reject) => {
+          // Imposta un timeout più lungo per il caricamento dei metadati di file di grandi dimensioni
+          const timeoutId = setTimeout(() => {
+            console.warn('Timeout nel rilevamento durata, uso calcolo approssimativo');
+            
+            // Calcolo approssimativo basato sulla dimensione del file per MP3
+            // Un file MP3 a 128kbps è circa 1MB per 8 minuti
+            if (file.type.includes('mp3') || file.type.includes('mpeg') || file.name.toLowerCase().endsWith('.mp3')) {
+              // Stima: dimensione_KB / 16 = secondi (128kbps)
+              const estimatedDuration = Math.ceil(file.size / 1024 / 16);
+              console.log('Durata MP3 stimata dalla dimensione:', estimatedDuration, 'secondi');
+              
+              // Per sicurezza, limita la stima a un valore ragionevole
+              const cappedDuration = Math.min(estimatedDuration, 3600); // Max 60 minuti
+              resolve(cappedDuration);
+            } else {
+              // Per altri tipi di file impostiamo un valore ragionevole basato sulla dimensione
+              const estimatedDuration = Math.ceil(file.size / 1024 / 32); // Presume una qualità maggiore
+              const cappedDuration = Math.min(Math.max(estimatedDuration, 60), 3600); // Min 1 min, max 60 min
+              console.log('Durata stimata per file non-MP3:', cappedDuration, 'secondi');
+              resolve(cappedDuration);
+            }
+          }, 10000); // 10 secondi di timeout per file più grandi
+          
           audioElement.addEventListener('loadedmetadata', () => {
-            duration = Math.ceil(audioElement.duration);
-            console.log('Durata audio rilevata:', duration, 'secondi');
-            setRecordingTime(duration);
-            resolve(null);
+            clearTimeout(timeoutId);
+            const detectedDuration = Math.ceil(audioElement.duration);
+            console.log('Durata audio rilevata correttamente:', detectedDuration, 'secondi');
+            resolve(detectedDuration);
           });
           
           audioElement.addEventListener('error', (e) => {
+            clearTimeout(timeoutId);
             console.error('Error loading audio:', e);
-            reject(new Error('Errore nel caricamento del file audio'));
+            // In caso di errore, stima comunque la durata invece di fallire
+            const estimatedDuration = Math.ceil(file.size / 1024 / 16);
+            const cappedDuration = Math.min(estimatedDuration, 3600);
+            console.log('Errore nel rilevamento durata, uso stima:', cappedDuration);
+            resolve(cappedDuration);
           });
         });
+        
+        duration = await durationPromise;
+        setRecordingTime(duration);
+        setFileDetails({...fileInfo, duration});
+        console.log('Durata finale utilizzata:', duration, 'secondi');
       } catch (error) {
         console.error('Errore nel calcolo della durata:', error);
-        throw new Error('Impossibile determinare la durata del file audio');
+        // Non fallire completamente ma usa una stima conservativa
+        duration = Math.ceil(file.size / 1024 / 16);
+        duration = Math.min(duration, 1800); // Max 30 minuti
+        console.log('Usando durata di fallback:', duration);
+        setRecordingTime(duration);
+        setFileDetails({...fileInfo, duration});
       }
 
-      // Determina se è un file MP3
+      // Determina se è un file MP3 o M4A
       const isMP3 = file.type.includes('mp3') || file.type.includes('mpeg') || file.name.toLowerCase().endsWith('.mp3');
+      const isM4A = file.type.includes('m4a') || file.type.includes('mp4') || file.name.toLowerCase().endsWith('.m4a');
+      const isLargeFile = file.size > 5 * 1024 * 1024; // Più di 5MB è considerato grande
       
       console.log('Dettagli trascrizione:', { 
         durata: duration,
         tipo: file.type,
         isMP3,
+        isM4A,
+        isLargeFile,
+        dimensione: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
         recordingTime
       });
+      
+      // Avviso per file molto grandi
+      if (file.size > 8 * 1024 * 1024) {
+        console.log('File molto grande, potrebbe superare i limiti del server');
+        setError('Attenzione: File audio di grandi dimensioni (> 8MB). Consigliamo di convertire il file in formato più efficiente (m4a) o comprimerlo a una qualità inferiore (96kbps) prima del caricamento.');
+      } else if (file.size > 5 * 1024 * 1024) {
+        console.log('File grande, la trascrizione potrebbe richiedere diversi minuti');
+        setError('File audio di grandi dimensioni. La trascrizione potrebbe richiedere diversi minuti, attendere prego...');
+      }
 
       let text;
       try {
-        if (isMP3) {
-          console.log('CHIAMATA A uploadAndTranscribeFileDedicated');
+        // Per file M4A di qualsiasi dimensione, usa sempre upload-direct
+        if (isM4A) {
+          console.log('File M4A rilevato, utilizzo funzione uploadAndTranscribeFileDedicated per accesso diretto a OpenAI');
+          text = await uploadAndTranscribeFileDedicated(file);
+        }
+        // Per i file molto grandi o lunghi, usa la funzione dedicata
+        else if (isLargeFile || duration > 300) { // 5 minuti o più
+          console.log('File grande/lungo, utilizzo funzione dedicata');
+          text = await uploadAndTranscribeFileDedicated(file);
+        } else if (isMP3) {
+          console.log('CHIAMATA A uploadAndTranscribeFileDedicated per MP3 standard');
           text = await uploadAndTranscribeFileDedicated(file);
         } else {
-          console.log('CHIAMATA A uploadAndTranscribeFile');
+          console.log('CHIAMATA A uploadAndTranscribeFile per altri formati');
           text = await uploadAndTranscribeFile(file);
         }
         
@@ -436,26 +543,45 @@ export function NewConsultation() {
       } catch (transcriptionError) {
         console.error('Errore durante la trascrizione:', transcriptionError);
         
-        // Se fallisce la funzione dedicata per MP3, prova con la funzione standard come fallback
-        if (isMP3) {
-          console.log('FALLBACK: Tentativo con funzione standard dopo fallimento funzione dedicata');
-          try {
-            text = await uploadAndTranscribeFile(file);
-            console.log('Trascrizione con fallback completata, lunghezza:', text.length);
-            setTranscription(text);
-            await processConsultation(text);
-          } catch (fallbackError) {
-            console.error('Errore anche nel fallback:', fallbackError);
-            throw fallbackError;
+        // Se fallisce, prova con l'altra funzione come fallback
+        console.log('FALLBACK: Tentativo con funzione alternativa dopo fallimento');
+        try {
+          // Se abbiamo usato uploadAndTranscribeFileDedicated, proviamo con upload-direct direttamente
+          if (isM4A) {
+            console.log('ERRORE con M4A. Il file potrebbe essere danneggiato o in un formato non supportato.');
+            throw new Error('Il file M4A non può essere elaborato. Prova a convertirlo in un altro formato come MP3 a 96kbps.');
           }
-        } else {
-          throw transcriptionError;
+          else if (isMP3 || isLargeFile) {
+            console.log('Fallback a uploadAndTranscribeFile');
+            text = await uploadAndTranscribeFile(file);
+          } else {
+            console.log('Fallback a uploadAndTranscribeFileDedicated');
+            text = await uploadAndTranscribeFileDedicated(file);
+          }
+          
+          console.log('Trascrizione con fallback completata, lunghezza:', text.length);
+          setTranscription(text);
+          await processConsultation(text);
+        } catch (fallbackError) {
+          console.error('Errore anche nel fallback:', fallbackError);
+          throw fallbackError;
         }
       }
     } catch (error) {
       const err = error as Error;
       console.error('File upload error:', err);
-      setError(`Elaborazione fallita: ${err.message}`);
+      
+      // Messaggi di errore più specifici per problemi comuni
+      if (err.message.includes('troppo grande')) {
+        setError(`Elaborazione fallita: ${err.message}`);
+      } else if (err.message.includes('timeout') || err.message.includes('timed out')) {
+        setError(`Elaborazione fallita: Timeout durante l'elaborazione. Il file potrebbe essere troppo grande (${(file.size / 1024 / 1024).toFixed(1)} MB). Prova a convertirlo in un formato più efficiente (m4a) o a comprimerlo.`);
+      } else if (err.message.includes('500') || err.message.includes('Internal Error')) {
+        setError(`Elaborazione fallita: Errore trascrizione (500): Errore interno del server. Il file potrebbe essere troppo grande o in un formato non ottimale. Prova a convertirlo in formato m4a o comprimi l'MP3 a 96kbps.`);
+      } else {
+        setError(`Elaborazione fallita: ${err.message}`);
+      }
+      
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -474,6 +600,29 @@ export function NewConsultation() {
           <div className="mb-6 p-4 bg-red-50 rounded-lg flex items-center gap-2 text-red-700">
             <AlertCircle className="h-5 w-5" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {/* Debug mode toggle and info */}
+        <div className="mb-4 text-right">
+          <button 
+            onClick={() => setShowDebugInfo(!showDebugInfo)}
+            className="text-xs text-gray-500 underline"
+          >
+            {showDebugInfo ? 'Nascondi dettagli debug' : 'Mostra dettagli debug'}
+          </button>
+        </div>
+
+        {showDebugInfo && fileDetails && (
+          <div className="mb-6 p-3 bg-gray-50 rounded-lg border text-sm text-gray-700">
+            <h3 className="font-medium mb-1">Dettagli File:</h3>
+            <ul className="space-y-1">
+              <li><span className="font-medium">Nome:</span> {fileDetails.name}</li>
+              <li><span className="font-medium">Tipo:</span> {fileDetails.type}</li>
+              <li><span className="font-medium">Dimensione:</span> {fileDetails.size}</li>
+              <li><span className="font-medium">Durata:</span> {fileDetails.duration} secondi ({formatTime(fileDetails.duration)})</li>
+              <li><span className="font-medium">Ultima modifica:</span> {fileDetails.lastModified}</li>
+            </ul>
           </div>
         )}
 
@@ -542,6 +691,16 @@ export function NewConsultation() {
                 Il paziente acconsente alla registrazione audio e al trattamento dei dati (conformità GDPR)
               </span>
             </label>
+          </div>
+          
+          <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-sm text-blue-700">
+            <p className="font-medium mb-1">Informazioni sul caricamento file</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Dimensione massima consigliata: 5MB</li>
+              <li>Per file audio più grandi, si consiglia di comprimerli prima del caricamento</li>
+              <li>Formati supportati: MP3, WAV, M4A</li>
+              <li>Durata massima consigliata: 15 minuti</li>
+            </ul>
           </div>
         </div>
 
@@ -613,7 +772,21 @@ export function NewConsultation() {
               
               <p className="text-sm text-gray-500">
                 {processingSteps[processingStep]}
+                {isTranscribing && fileDetails && fileDetails.duration > 300 && (
+                  <span className="ml-1 text-amber-600">
+                    (File lungo: {Math.floor(fileDetails.duration / 60)} min)
+                  </span>
+                )}
               </p>
+              
+              {isTranscribing && elapsedTime > 0 && (
+                <div className="text-xs text-gray-500 flex items-center gap-2">
+                  <span>Tempo trascorso: {formatElapsedTime(elapsedTime)}</span>
+                  {fileDetails?.duration && fileDetails.duration > 60 && (
+                    <span>| Durata stimata file: {formatTime(fileDetails.duration)}</span>
+                  )}
+                </div>
+              )}
             
               <div className="w-full max-w-md mt-2">
                 <div className="flex items-center justify-between mb-1">
@@ -629,6 +802,13 @@ export function NewConsultation() {
                     }}
                   />
                 </div>
+                
+                {isTranscribing && elapsedTime > 120 && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    La trascrizione di file audio lunghi può richiedere diversi minuti. 
+                    Non chiudere questa finestra fino al completamento.
+                  </p>
+                )}
               </div>
             </div>
           </div>

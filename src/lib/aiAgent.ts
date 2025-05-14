@@ -41,6 +41,12 @@ export async function saveConsultation(
   durationSeconds: number = 0
 ) {
   try {
+    // Assicurati che durationSeconds sia un valore positivo
+    if (durationSeconds <= 0) {
+      console.warn('[saveConsultation] Invalid duration_seconds provided:', durationSeconds, 'using default');
+      durationSeconds = Math.max(60, Math.ceil((consultation.transcription?.length || 0) / 10));
+    }
+    
     console.log('[saveConsultation] Starting...', {
       patientId: consultation.patientId,
       gdprConsent,
@@ -53,7 +59,7 @@ export async function saveConsultation(
       throw new Error('Patient ID is required');
     }
 
-    // Verify that the patient exists
+    // Ottieni informazioni del paziente, incluso user_id
     const { data: patient, error: patientError } = await supabase
       .from('patients')
       .select('id, first_name, last_name, user_id')
@@ -69,8 +75,10 @@ export async function saveConsultation(
       throw new Error(`Patient with ID ${consultation.patientId} not found`);
     }
 
+    // Crea l'oggetto dati includendo user_id dal paziente
     const consultationData = {
       patient_id: consultation.patientId,
+      user_id: patient.user_id, // Aggiungi user_id preso dal paziente
       audio_url: consultation.audioUrl,
       transcription: consultation.transcription,
       medical_report: report,
@@ -88,12 +96,18 @@ export async function saveConsultation(
       note_specialista: report.noteSpecialista !== 'N.A.' ? report.noteSpecialista : null
     };
 
+    // Log con riferimento a user_id
     console.log('[saveConsultation] Saving consultation with data:', {
-      ...consultationData,
+      patient_id: consultationData.patient_id,
+      user_id: consultationData.user_id,
+      duration_seconds: consultationData.duration_seconds,
+      visita: consultationData.visita,
+      // Ometti dati più lunghi
       medical_report: '(omitted)',
       transcription: '(omitted)'
     });
 
+    // Inserisci la consultazione con il riferimento a user_id
     const { data, error } = await supabase
       .from('consultations')
       .insert([consultationData])
@@ -106,13 +120,96 @@ export async function saveConsultation(
     }
 
     console.log('[saveConsultation] Consultation saved successfully:', {
-      ...data,
-      medical_report: '(omitted)',
-      transcription: '(omitted)'
+      id: data.id,
+      patient_id: data.patient_id,
+      user_id: data.user_id,
+      duration_seconds: data.duration_seconds
     });
+    
     return data;
   } catch (error) {
     console.error('[saveConsultation] Error:', error);
     throw error;
+  }
+}
+
+/**
+ * Aggiorna il campo user_id nelle consultazioni esistenti che ne sono prive
+ * @returns Promise<number> - Numero di record aggiornati
+ */
+export async function fixConsultationsWithMissingUserId() {
+  try {
+    console.log('[fixConsultationsWithMissingUserId] Checking for consultations with missing user_id');
+    
+    // Primo otteniamo tutte le consultazioni senza user_id
+    const { data: consultationsWithoutUserId, error } = await supabase
+      .from('consultations')
+      .select('id, patient_id')
+      .is('user_id', null);
+    
+    if (error) {
+      console.error('[fixConsultationsWithMissingUserId] Error fetching consultations:', error);
+      return 0;
+    }
+    
+    console.log(`[fixConsultationsWithMissingUserId] Found ${consultationsWithoutUserId?.length || 0} consultations without user_id`);
+    
+    if (!consultationsWithoutUserId || consultationsWithoutUserId.length === 0) {
+      return 0;
+    }
+    
+    // Creiamo un dizionario per memorizzare la cache di user_id per ogni patient_id
+    const patientUserIdCache: Record<string, string> = {};
+    let updatedCount = 0;
+    
+    // Aggiorniamo ciascuna consultazione individualmente
+    for (const consultation of consultationsWithoutUserId) {
+      try {
+        let userId: string | null = null;
+        
+        // Controlla se abbiamo già il user_id per questo patient_id nella cache
+        if (patientUserIdCache[consultation.patient_id]) {
+          userId = patientUserIdCache[consultation.patient_id];
+        } else {
+          // Altrimenti ottieni il user_id dalla tabella patients
+          const { data: patient, error: patientError } = await supabase
+            .from('patients')
+            .select('user_id')
+            .eq('id', consultation.patient_id)
+            .single();
+            
+          if (patientError || !patient?.user_id) {
+            console.warn(`[fixConsultationsWithMissingUserId] Unable to find user_id for patient ${consultation.patient_id}:`, patientError);
+            continue;
+          }
+          
+          userId = patient.user_id;
+          // Salva nella cache per uso futuro
+          patientUserIdCache[consultation.patient_id] = patient.user_id;
+        }
+        
+        if (!userId) continue;
+        
+        // Aggiorna la consultazione con il user_id corretto
+        const { error: updateError } = await supabase
+          .from('consultations')
+          .update({ user_id: userId })
+          .eq('id', consultation.id);
+          
+        if (updateError) {
+          console.error(`[fixConsultationsWithMissingUserId] Error updating consultation ${consultation.id}:`, updateError);
+        } else {
+          updatedCount++;
+        }
+      } catch (itemError) {
+        console.error(`[fixConsultationsWithMissingUserId] Error processing consultation ${consultation.id}:`, itemError);
+      }
+    }
+    
+    console.log(`[fixConsultationsWithMissingUserId] Successfully updated ${updatedCount} consultations with missing user_id`);
+    return updatedCount;
+  } catch (error) {
+    console.error('[fixConsultationsWithMissingUserId] Error:', error);
+    return 0;
   }
 }

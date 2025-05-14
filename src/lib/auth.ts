@@ -2,100 +2,63 @@ import { supabase } from './supabase';
 
 export async function signInWithEmail(email: string, password: string) {
   try {
-    // 🔐 1. Prova a fare login con Supabase Auth
+    console.log('📧 Tentativo di login per:', email);
+
+    // Step 1: Login con Supabase Auth
     const { data: sessionData, error: sessionError } = await supabase.auth.signInWithPassword({
       email,
-      password
+      password,
     });
 
     if (sessionError) {
-      console.error('Auth error details:', sessionError);
-
-      if (sessionError.message === 'Invalid login credentials') {
-        return {
-          data: null,
-          error: 'Password non corretta. Usa il link "Password dimenticata?" per reimpostarla.'
-        };
-      }
+      console.error('❌ Errore autenticazione:', sessionError);
 
       return {
         data: null,
-        error: 'Errore durante l\'accesso. Riprova più tardi.'
-      };
-    }
-
-    if (!sessionData.user) {
-      return {
-        data: null,
-        error: 'Nessun dato utente restituito dopo il login.'
+        error: sessionError.message === 'Invalid login credentials'
+          ? 'Credenziali errate. Prova a reimpostare la password.'
+          : 'Errore durante il login. Riprova più tardi.',
       };
     }
 
     const userId = sessionData.user.id;
-    const userEmail = sessionData.user.email;
 
-    // 🧠 2. Recupera (o crea) il profilo nella tabella "users"
-    let retryCount = 0;
-    const maxRetries = 3;
+    // Step 2: Recupera il profilo utente dalla tabella `users`
+    const { data: user, error: profileError } = await supabase
+      .from('users')
+      .select('id, email, full_name, role, is_active, subscription_tier')
+      .eq('id', userId)
+      .maybeSingle();
 
-    while (retryCount < maxRetries) {
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('id, email, full_name, role, is_active, subscription_tier')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (userError) {
-        console.error(`Errore query profilo (tentativo ${retryCount + 1}):`, userError);
-        retryCount++;
-        await new Promise(res => setTimeout(res, 1000 * retryCount));
-        continue;
-      }
-
-      // 🆕 Se il profilo non esiste, crealo
-      if (!userData) {
-        const { data: newUser, error: createError } = await supabase
-          .from('users')
-          .insert([{
-            id: userId,
-            email: userEmail,
-            is_active: true,
-            role: 'doctor',
-            subscription_tier: 'free'
-          }])
-          .select()
-          .maybeSingle();
-
-        if (createError) {
-          console.error('Errore durante la creazione del profilo:', createError);
-          return {
-            data: null,
-            error: 'Errore durante la creazione del profilo utente. Riprova più tardi.'
-          };
-        }
-
-        return { data: { session: sessionData, user: newUser }, error: null };
-      }
-
-      if (!userData.is_active) {
-        return {
-          data: null,
-          error: 'Account disattivato. Contatta il supporto per assistenza.'
-        };
-      }
-
-      return { data: { session: sessionData, user: userData }, error: null };
+    if (profileError) {
+      console.error('❌ Errore recupero profilo:', profileError);
+      return { data: null, error: 'Errore nel recupero del profilo utente.' };
     }
 
+    if (!user) {
+      console.warn('⚠️ Nessun profilo trovato. Potrebbe essere in fase di creazione da trigger Supabase.');
+      return {
+        data: null,
+        error: 'Profilo utente non trovato. Attendi qualche istante e riprova.',
+      };
+    }
+
+    if (!user.is_active) {
+      console.warn('⚠️ Profilo utente disattivato:', userId);
+      return {
+        data: null,
+        error: 'Il tuo account è disattivato. Contatta il supporto.',
+      };
+    }
+
+    console.log('✅ Login riuscito per:', userId);
+    return { data: { session: sessionData, user }, error: null };
+
+  } catch (err) {
+    console.error('❌ Errore imprevisto nel login:', err);
     return {
       data: null,
-      error: 'Errore durante il recupero del profilo. Riprova più tardi.'
-    };
-  } catch (error: any) {
-    console.error('Errore imprevisto durante il login:', error);
-    return {
-      data: null,
-      error: 'Si è verificato un errore imprevisto. Riprova più tardi.'
+      error: 'Errore imprevisto. Riprova più tardi.',
     };
   }
 }
@@ -103,23 +66,64 @@ export async function signInWithEmail(email: string, password: string) {
 export async function resetPassword(email: string) {
   try {
     const siteUrl = import.meta.env.VITE_SITE_URL || 'https://zenscribe.it';
-    const resetUrl = `${siteUrl}/reset-password`;
+    const redirectTo = `${siteUrl}/reset-password`;
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: resetUrl,
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
 
     if (error) throw error;
 
     return {
-      data: 'Se l\'indirizzo email esiste, riceverai le istruzioni per reimpostare la password.',
+      data: 'Se l\'email è registrata, riceverai un link per reimpostare la password.',
       error: null
     };
-  } catch (error: any) {
-    console.error('Errore invio reset password:', error);
+  } catch (error) {
+    console.error('❌ Errore invio reset password:', error);
     return {
       data: null,
-      error: 'Impossibile inviare l\'email di reset. Riprova più tardi.'
+      error: 'Errore durante l\'invio della mail di reset. Riprova più tardi.',
     };
+  }
+}
+
+export async function signUpWithEmail(email: string, password: string, full_name: string) {
+  try {
+    // 1. Registrazione con Supabase Auth
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name }
+      }
+    });
+
+    if (signUpError) {
+      return { data: null, error: 'Errore durante la registrazione: ' + signUpError.message };
+    }
+
+    const user = signUpData.user;
+    if (!user) {
+      return { data: null, error: 'Registrazione fallita: utente non creato.' };
+    }
+
+    // 2. Inserimento nella tabella custom users
+    const { error: insertError } = await supabase.from('users').insert({
+      id: user.id,
+      email: user.email,
+      full_name,
+      role: 'doctor',
+      is_active: true,
+      subscription_tier: 'free',
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+
+    if (insertError) {
+      // (Opzionale) Potresti voler cancellare l'utente auth appena creato in caso di errore qui
+      return { data: null, error: 'Errore durante la creazione del profilo utente: ' + insertError.message };
+    }
+
+    return { data: { user }, error: null };
+  } catch (err) {
+    return { data: null, error: 'Errore imprevisto: ' + err.message };
   }
 }
