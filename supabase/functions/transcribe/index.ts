@@ -19,14 +19,14 @@ Deno.serve(async (req) => {
   try {
     // Get the audio data from request
     const formData = await req.formData();
-    const audioFile = formData.get('audio') as File;
+    const audioFile = formData.get('file') as File;
 
     if (!audioFile) {
       throw new Error('No audio file provided');
     }
 
     // Get OpenAI key from environment variable
-    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    const openaiKey = Deno.env.get('OPENAI_SECRET_KEY');
     if (!openaiKey) {
       throw new Error('OpenAI API key not found in environment variables');
     }
@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     });
 
     // Call OpenAI API
-    const response = await openai.audio.transcriptions.create({
+    const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: 'whisper-1',
       language: 'it',
@@ -45,10 +45,11 @@ Deno.serve(async (req) => {
       temperature: 0
     });
 
-    return new Response(JSON.stringify({ transcription: response }), {
+    // Return the transcription directly as text
+    return new Response(transcription, {
       headers: {
         ...corsHeaders,
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/plain',
       },
     });
   } catch (error) {
