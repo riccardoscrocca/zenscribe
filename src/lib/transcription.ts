@@ -1,58 +1,88 @@
 export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   const sessionId = Math.random().toString(36).substring(2, 10);
+  console.log(`[${sessionId}] [transcribeAudio] Inizio trascrizione...`, {
+    size: audioBlob.size,
+    type: audioBlob.type
+  });
+
   try {
-    console.log(`[${sessionId}] [transcribeAudio] Inizio trascrizione...`, {
-      type: audioBlob.type,
-      size: audioBlob.size,
-      tipoFile: audioBlob.type || 'sconosciuto'
+    // Crea un file dal blob
+    const audioFile = new File([audioBlob], `recording-${sessionId}.webm`, {
+      type: audioBlob.type
     });
 
-    // Determina l'estensione del file in base al tipo MIME
-    let extension = 'webm';
-    let mimeType = audioBlob.type || '';
-    
-    if (mimeType.includes('mp3') || mimeType.includes('mpeg')) {
-      extension = 'mp3';
-      console.log(`[${sessionId}] [transcribeAudio] Rilevato file MP3`);
-    } else if (mimeType.includes('wav')) {
-      extension = 'wav';
-      console.log(`[${sessionId}] [transcribeAudio] Rilevato file WAV`);
-    } else if (mimeType.includes('m4a') || mimeType.includes('mp4')) {
-      extension = 'm4a';
-      console.log(`[${sessionId}] [transcribeAudio] Rilevato file M4A/MP4`);
-    } else {
-      console.log(`[${sessionId}] [transcribeAudio] Tipo di file non riconosciuto, uso default webm`);
-    }
+    // Determina l'endpoint appropriato
+    const isM4AFile = audioFile.type.includes('m4a') || audioFile.type.includes('mp4');
+    const endpoint = isM4AFile
+      ? '/.netlify/functions/upload-direct'
+      : (audioFile.size > 3 * 1024 * 1024 && audioFile.size <= 8 * 1024 * 1024
+        ? '/.netlify/functions/transcribe-audio'
+        : (audioFile.size > 8 * 1024 * 1024 
+            ? '/.netlify/functions/upload-direct' 
+            : '/.netlify/functions/upload-transcribe'));
 
-    console.log(`[${sessionId}] [transcribeAudio] Estensione determinata:`, extension);
+    console.log(`[${sessionId}] [transcribeAudio] Endpoint selezionato: ${endpoint}`, {
+      size: audioFile.size,
+      type: audioFile.type,
+      isM4A: isM4AFile
+    });
 
-    // Crea una copia del blob con il tipo MIME corretto se necessario
-    let audioFile = audioBlob;
-    if (!audioBlob.type || audioBlob.type === 'audio/mp3') {
-      // Correggi il MIME type per i file MP3
-      audioFile = new Blob([audioBlob], { type: 'audio/mpeg' });
-      console.log(`[${sessionId}] [transcribeAudio] Creato nuovo blob con tipo MIME corretto:`, audioFile.type);
-    }
-
-    // Crea FormData per inviare l'audio alla Netlify Function
     const formData = new FormData();
-    const fileName = `recording.${extension}`;
-    formData.append('file', audioFile, fileName);
+    formData.append('file', audioFile);
     formData.append('model', 'whisper-1');
     formData.append('language', 'it');
     formData.append('response_format', 'text');
     formData.append('temperature', '0');
     formData.append('session_id', sessionId);
-    // Aggiungi prompt per trascrizione letterale
     formData.append('prompt', 'Trascrivi letteralmente tutto, incluse ripetizioni e false partenze. Non modificare, riassumere o correggere il testo.');
 
-    console.log(`[${sessionId}] [transcribeAudio] FormData creato, invio file...`, {
-      filename: fileName,
-      type: audioFile.type,
-      keys: [...formData.keys()].join(', ')
-    });
+    // Aggiungi timeout esteso
+    const timeoutMs = Math.min(Math.max(audioFile.size / 1024, 30000), 600000); // Min 30s, max 10min
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    return await callTranscriptionApi(formData);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Errore nella risposta: ${response.status} ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type');
+      let transcriptionText: string;
+
+      if (contentType?.includes('application/json')) {
+        const jsonResponse = await response.json();
+        transcriptionText = jsonResponse.text || jsonResponse.transcript || '';
+      } else {
+        transcriptionText = await response.text();
+      }
+
+      if (!transcriptionText) {
+        throw new Error('Trascrizione vuota ricevuta dal server');
+      }
+
+      console.log(`[${sessionId}] [transcribeAudio] Trascrizione completata`, {
+        length: transcriptionText.length,
+        preview: transcriptionText.substring(0, 100)
+      });
+
+      return transcriptionText;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      
+      if (error.name === 'AbortError') {
+        throw new Error(`Timeout nella richiesta dopo ${timeoutMs/1000}s. Prova con un file più piccolo.`);
+      }
+      
+      throw error;
+    }
   } catch (error) {
     console.error(`[${sessionId}] [transcribeAudio] Errore:`, error);
     throw error;

@@ -40,26 +40,35 @@ export async function saveConsultation(
   visitType: 'prima_visita' | 'visita_controllo' = 'prima_visita',
   durationSeconds: number = 0
 ) {
+  const sessionId = Math.random().toString(36).substring(2, 10);
+  console.log(`[${sessionId}] [saveConsultation] Inizio salvataggio...`, {
+    patientId: consultation.patientId,
+    gdprConsent,
+    visitType,
+    durationSeconds,
+    transcriptionLength: consultation.transcription?.length
+  });
+
   try {
     // Assicurati che durationSeconds sia un valore positivo
     if (durationSeconds <= 0) {
-      console.warn('[saveConsultation] Invalid duration_seconds provided:', durationSeconds, 'using default');
-      durationSeconds = Math.max(60, Math.ceil((consultation.transcription?.length || 0) / 10));
+      console.warn(`[${sessionId}] [saveConsultation] Durata non valida:`, durationSeconds);
+      // Stima la durata basata sulla lunghezza della trascrizione
+      const wordsCount = consultation.transcription?.split(/\s+/).length || 0;
+      const estimatedMinutes = (wordsCount / 150) * 1.2; // 150 parole/min + 20% margine
+      durationSeconds = Math.max(30, Math.ceil(estimatedMinutes * 60)); // Minimo 30 secondi
+      console.log(`[${sessionId}] [saveConsultation] Durata stimata:`, {
+        words: wordsCount,
+        estimatedMinutes,
+        durationSeconds
+      });
     }
-    
-    console.log('[saveConsultation] Starting...', {
-      patientId: consultation.patientId,
-      gdprConsent,
-      visitType,
-      durationSeconds
-    });
 
     if (!consultation.patientId) {
-      console.error('[saveConsultation] No patient ID provided');
       throw new Error('Patient ID is required');
     }
 
-    // Ottieni informazioni del paziente, incluso user_id
+    // Ottieni informazioni del paziente
     const { data: patient, error: patientError } = await supabase
       .from('patients')
       .select('id, first_name, last_name, user_id')
@@ -67,7 +76,7 @@ export async function saveConsultation(
       .single();
 
     if (patientError) {
-      console.error('[saveConsultation] Patient verification error:', patientError);
+      console.error(`[${sessionId}] [saveConsultation] Errore verifica paziente:`, patientError);
       throw new Error(`Failed to verify patient: ${patientError.message}`);
     }
 
@@ -75,60 +84,49 @@ export async function saveConsultation(
       throw new Error(`Patient with ID ${consultation.patientId} not found`);
     }
 
-    // Crea l'oggetto dati includendo user_id dal paziente
-    const consultationData = {
-      patient_id: consultation.patientId,
-      user_id: patient.user_id, // Aggiungi user_id preso dal paziente
-      audio_url: consultation.audioUrl,
-      transcription: consultation.transcription,
-      medical_report: report,
-      gdpr_consent: gdprConsent,
-      visita: visitType,
-      duration_seconds: durationSeconds,
-      motivo_visita: report.motivoVisita !== 'N.A.' ? report.motivoVisita : null,
-      storia_medica: report.storiaMedica !== 'N.A.' ? report.storiaMedica : null,
-      storia_ponderale: report.storiaPonderale !== 'N.A.' ? report.storiaPonderale : null,
-      abitudini_alimentari: report.abitudiniAlimentari !== 'N.A.' ? report.abitudiniAlimentari : null,
-      attivita_fisica: report.attivitaFisica !== 'N.A.' ? report.attivitaFisica : null,
-      fattori_psi: report.fattoriPsi !== 'N.A.' ? report.fattoriPsi : null,
-      esami_parametri: report.esamiParametri !== 'N.A.' ? report.esamiParametri : null,
-      punti_critici: report.puntiCritici !== 'N.A.' ? report.puntiCritici : null,
-      note_specialista: report.noteSpecialista !== 'N.A.' ? report.noteSpecialista : null
-    };
+    // Verifica la sottoscrizione dell'utente
+    const { data: subscription, error: subError } = await supabase
+      .from('user_subscriptions')
+      .select('id, minutes_used, plan_id')
+      .eq('user_id', patient.user_id)
+      .gte('current_period_end', new Date().toISOString())
+      .order('current_period_end', { ascending: false })
+      .limit(1)
+      .single();
 
-    // Log con riferimento a user_id
-    console.log('[saveConsultation] Saving consultation with data:', {
-      patient_id: consultationData.patient_id,
-      user_id: consultationData.user_id,
-      duration_seconds: consultationData.duration_seconds,
-      visita: consultationData.visita,
-      // Ometti dati più lunghi
-      medical_report: '(omitted)',
-      transcription: '(omitted)'
-    });
+    if (subError && subError.code !== 'PGRST116') {
+      console.error(`[${sessionId}] [saveConsultation] Errore verifica sottoscrizione:`, subError);
+      throw new Error(`Failed to verify subscription: ${subError.message}`);
+    }
 
-    // Inserisci la consultazione con il riferimento a user_id
-    const { data, error } = await supabase
+    // Salva la consultazione
+    const { data: consultationData, error: consultationError } = await supabase
       .from('consultations')
-      .insert([consultationData])
+      .insert({
+        patient_id: consultation.patientId,
+        transcription: consultation.transcription,
+        report: report,
+        gdpr_consent: gdprConsent,
+        visit_type: visitType,
+        duration_seconds: durationSeconds,
+        user_id: patient.user_id
+      })
       .select()
       .single();
 
-    if (error) {
-      console.error('[saveConsultation] Insert error:', error);
-      throw new Error(`Failed to save consultation: ${error.message}`);
+    if (consultationError) {
+      console.error(`[${sessionId}] [saveConsultation] Errore salvataggio consultazione:`, consultationError);
+      throw new Error(`Failed to save consultation: ${consultationError.message}`);
     }
 
-    console.log('[saveConsultation] Consultation saved successfully:', {
-      id: data.id,
-      patient_id: data.patient_id,
-      user_id: data.user_id,
-      duration_seconds: data.duration_seconds
+    console.log(`[${sessionId}] [saveConsultation] Consultazione salvata con successo:`, {
+      id: consultationData.id,
+      duration: consultationData.duration_seconds
     });
-    
-    return data;
+
+    return consultationData;
   } catch (error) {
-    console.error('[saveConsultation] Error:', error);
+    console.error(`[${sessionId}] [saveConsultation] Errore:`, error);
     throw error;
   }
 }
