@@ -115,7 +115,7 @@ export async function saveConsultation(
       .insert({
         patient_id: consultation.patientId,
         transcription: consultation.transcription,
-        report: report,
+        medical_report: report,
         gdpr_consent: gdprConsent,
         visit_type: visitType,
         duration_seconds: durationSeconds,
