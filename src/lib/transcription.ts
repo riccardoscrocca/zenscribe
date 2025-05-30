@@ -1,3 +1,5 @@
+import { supabase } from './supabase';
+
 export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   const sessionId = Math.random().toString(36).substring(2, 10);
   console.log(`[${sessionId}] [transcribeAudio] Inizio trascrizione...`, {
@@ -34,9 +36,14 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const response = await fetch(endpoint, {
         method: 'POST',
         body: formData,
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         signal: controller.signal
       });
 
@@ -128,9 +135,14 @@ export async function uploadAndTranscribeFile(file: File): Promise<string> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const response = await fetchWithRetry(endpoint, {
         method: 'POST',
         body: formData,
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         signal: controller.signal
       }, 3);  // 3 tentativi massimi
       clearTimeout(timeoutId);
@@ -233,9 +245,14 @@ export async function uploadAndTranscribeFileDedicated(file: File): Promise<stri
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const response = await fetch(endpoint, {
         method: 'POST',
         body: formData,
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         signal: controller.signal
       });
       clearTimeout(timeoutId);
