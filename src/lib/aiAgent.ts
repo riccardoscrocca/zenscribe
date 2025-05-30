@@ -117,7 +117,7 @@ export async function saveConsultation(
         transcription: consultation.transcription,
         medical_report: report,
         gdpr_consent: gdprConsent,
-        visit_type: visitType,
+        visita: visitType,
         duration_seconds: durationSeconds,
         user_id: patient.user_id
       })
