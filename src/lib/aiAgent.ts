@@ -55,10 +55,20 @@ export async function saveConsultation(
       console.warn(`[${sessionId}] [saveConsultation] Durata non valida:`, durationSeconds);
       // Stima la durata basata sulla lunghezza della trascrizione
       const wordsCount = consultation.transcription?.split(/\s+/).length || 0;
-      const estimatedMinutes = (wordsCount / 150) * 1.2; // 150 parole/min + 20% margine
+      const charsCount = consultation.transcription?.length || 0;
+      
+      // Calcola la durata stimata usando entrambi i metodi e prendi il massimo
+      const wordsBasedMinutes = (wordsCount / 150) * 1.2; // 150 parole/min + 20% margine
+      const charsBasedMinutes = (charsCount / 750) * 1.2; // 750 caratteri/min + 20% margine
+      
+      const estimatedMinutes = Math.max(wordsBasedMinutes, charsBasedMinutes);
       durationSeconds = Math.max(30, Math.ceil(estimatedMinutes * 60)); // Minimo 30 secondi
+      
       console.log(`[${sessionId}] [saveConsultation] Durata stimata:`, {
         words: wordsCount,
+        chars: charsCount,
+        wordsBasedMinutes,
+        charsBasedMinutes,
         estimatedMinutes,
         durationSeconds
       });
